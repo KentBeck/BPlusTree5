@@ -64,3 +64,10 @@ path = "src/bin/profile_iterate.rs"
 [[bin]]
 name = "profile_iterate_std"
 path = "src/bin/profile_iterate_std.rs"
+
+[[bin]]
+name = "profile_random_ops"
+path = "src/bin/profile_random_ops.rs"
+
+[profile.release]
+debug = true

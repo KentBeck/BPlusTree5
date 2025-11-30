@@ -1,0 +1,181 @@
+Analysis of sampling profile_random_ops (pid 31438) every 1 millisecond
+Process:         profile_random_ops [31438]
+Path:            /Users/USER/*/profile_random_ops
+Load Address:    0x10246c000
+Identifier:      profile_random_ops
+Version:         0
+Code Type:       ARM64
+Platform:        macOS
+Parent Process:  zsh [31437]
+Target Type:     live task
+
+Date/Time:       2025-11-29 17:24:53.687 -0800
+Launch Time:     2025-11-29 17:24:52.637 -0800
+OS Version:      macOS 15.6.1 (24G90)
+Report Version:  7
+Analysis Tool:   /usr/bin/sample
+
+Physical footprint:         123.6M
+Physical footprint (peak):  123.6M
+Idle exit:                  untracked
+----
+
+Call graph:
+    8387 Thread_46639227   DispatchQueue_1: com.apple.main-thread  (serial)
+      8387 start  (in dyld) + 6076  [0x18aa66b98]
+        8387 main  (in profile_random_ops) + 52  [0x10246f120]
+          8387 std::rt::lang_start_internal::h95cf27b851151b9c  (in profile_random_ops) + 888  [0x10248814c]
+            8387 std::rt::lang_start::_$u7b$$u7b$closure$u7d$$u7d$::h038a47ac76d40d0f  (in profile_random_ops) + 16  [0x10246c848]  rt.rs:199
+              8387 std::sys::backtrace::__rust_begin_short_backtrace::h7efc924576de3805  (in profile_random_ops) + 12  [0x10246c860]  backtrace.rs:152
+                3750 profile_random_ops::main::hf386d6d9b591e833  (in profile_random_ops) + 592  [0x10246e20c]  profile_random_ops.rs:40
+                + 3411 bplustree::insert::_$LT$impl$u20$bplustree..BPlusTreeMap$LT$K$C$V$GT$$GT$::insert_rec::h0fbe71892c4e85cf  (in profile_random_ops) + 424  [0x10246d980]  insert.rs:66
+                + ! 2308 bplustree::insert::_$LT$impl$u20$bplustree..BPlusTreeMap$LT$K$C$V$GT$$GT$::insert_rec::h0fbe71892c4e85cf  (in profile_random_ops) + 424  [0x10246d980]  insert.rs:66
+                + ! : 1720 bplustree::insert::_$LT$impl$u20$bplustree..BPlusTreeMap$LT$K$C$V$GT$$GT$::insert_rec::h0fbe71892c4e85cf  (in profile_random_ops) + 424  [0x10246d980]  insert.rs:66
+                + ! : | 1555 bplustree::insert::_$LT$impl$u20$bplustree..BPlusTreeMap$LT$K$C$V$GT$$GT$::insert_rec::h0fbe71892c4e85cf  (in profile_random_ops) + 228,164,...  [0x10246d8bc,0x10246d87c,...]  insert.rs:63
+                + ! : | 54 bplustree::insert::_$LT$impl$u20$bplustree..BPlusTreeMap$LT$K$C$V$GT$$GT$::insert_rec::h0fbe71892c4e85cf  (in profile_random_ops) + 24,0,...  [0x10246d7f0,0x10246d7d8,...]  insert.rs:60
+                + ! : | 54 bplustree::insert::_$LT$impl$u20$bplustree..BPlusTreeMap$LT$K$C$V$GT$$GT$::insert_rec::h0fbe71892c4e85cf  (in profile_random_ops) + 288  [0x10246d8f8]  insert.rs:63
+                + ! : | + 54 _platform_memmove  (in libsystem_platform.dylib) + 648,624,...  [0x18ae41548,0x18ae41530,...]
+                + ! : | 30 bplustree::insert::_$LT$impl$u20$bplustree..BPlusTreeMap$LT$K$C$V$GT$$GT$::insert_rec::h0fbe71892c4e85cf  (in profile_random_ops) + 304  [0x10246d908]  insert.rs:63
+                + ! : | + 25 _platform_memmove  (in libsystem_platform.dylib) + 624,464,...  [0x18ae41530,0x18ae41490,...]
+                + ! : | + 5 DYLD-STUB$$memmove  (in profile_random_ops) + 4  [0x1024a942c]
+                + ! : | 23 bplustree::insert::_$LT$impl$u20$bplustree..BPlusTreeMap$LT$K$C$V$GT$$GT$::insert_rec::h0fbe71892c4e85cf  (in profile_random_ops) + 40,44  [0x10246d800,0x10246d804]  insert.rs:62
+                + ! : | 2 bplustree::insert::_$LT$impl$u20$bplustree..BPlusTreeMap$LT$K$C$V$GT$$GT$::insert_rec::h0fbe71892c4e85cf  (in profile_random_ops) + 1116  [0x10246dc34]  insert.rs:63
+                + ! : | + 2 _platform_memmove  (in libsystem_platform.dylib) + 220  [0x18ae4139c]
+                + ! : | 1 bplustree::insert::_$LT$impl$u20$bplustree..BPlusTreeMap$LT$K$C$V$GT$$GT$::insert_rec::h0fbe71892c4e85cf  (in profile_random_ops) + 640  [0x10246da58]  insert.rs:63
+                + ! : | + 1 szone_malloc_should_clear  (in libsystem_malloc.dylib) + 120  [0x18ac07c0c]
+                + ! : | +   1 small_malloc_should_clear  (in libsystem_malloc.dylib) + 160  [0x18ac07db8]
+                + ! : | 1 bplustree::insert::_$LT$impl$u20$bplustree..BPlusTreeMap$LT$K$C$V$GT$$GT$::insert_rec::h0fbe71892c4e85cf  (in profile_random_ops) + 1880  [0x10246df30]  insert.rs:99
+                + ! : 442 bplustree::insert::_$LT$impl$u20$bplustree..BPlusTreeMap$LT$K$C$V$GT$$GT$::insert_rec::h0fbe71892c4e85cf  (in profile_random_ops) + 344,352,...  [0x10246d930,0x10246d938,...]  insert.rs:65
+                + ! : 58 bplustree::insert::_$LT$impl$u20$bplustree..BPlusTreeMap$LT$K$C$V$GT$$GT$::insert_rec::h0fbe71892c4e85cf  (in profile_random_ops) + 0,24,...  [0x10246d7d8,0x10246d7f0,...]  insert.rs:60
+                + ! : 51 bplustree::insert::_$LT$impl$u20$bplustree..BPlusTreeMap$LT$K$C$V$GT$$GT$::insert_rec::h0fbe71892c4e85cf  (in profile_random_ops) + 1900,1896,...  [0x10246df44,0x10246df40,...]  insert.rs:99
+                + ! : 17 bplustree::insert::_$LT$impl$u20$bplustree..BPlusTreeMap$LT$K$C$V$GT$$GT$::insert_rec::h0fbe71892c4e85cf  (in profile_random_ops) + 340  [0x10246d92c]  insert.rs:0
+                + ! : 10 bplustree::insert::_$LT$impl$u20$bplustree..BPlusTreeMap$LT$K$C$V$GT$$GT$::insert_rec::h0fbe71892c4e85cf  (in profile_random_ops) + 424,412,...  [0x10246d980,0x10246d974,...]  insert.rs:66
+                + ! : 9 bplustree::insert::_$LT$impl$u20$bplustree..BPlusTreeMap$LT$K$C$V$GT$$GT$::insert_rec::h0fbe71892c4e85cf  (in profile_random_ops) + 40  [0x10246d800]  insert.rs:62
+                + ! : 1 bplustree::insert::_$LT$impl$u20$bplustree..BPlusTreeMap$LT$K$C$V$GT$$GT$::insert_rec::h0fbe71892c4e85cf  (in profile_random_ops) + 444  [0x10246d994]  insert.rs:67
+                + ! 854 bplustree::insert::_$LT$impl$u20$bplustree..BPlusTreeMap$LT$K$C$V$GT$$GT$::insert_rec::h0fbe71892c4e85cf  (in profile_random_ops) + 344,352,...  [0x10246d930,0x10246d938,...]  insert.rs:65
+                + ! 114 bplustree::insert::_$LT$impl$u20$bplustree..BPlusTreeMap$LT$K$C$V$GT$$GT$::insert_rec::h0fbe71892c4e85cf  (in profile_random_ops) + 24,20,...  [0x10246d7f0,0x10246d7ec,...]  insert.rs:60
+                + ! 59 bplustree::insert::_$LT$impl$u20$bplustree..BPlusTreeMap$LT$K$C$V$GT$$GT$::insert_rec::h0fbe71892c4e85cf  (in profile_random_ops) + 340  [0x10246d92c]  insert.rs:0
+                + ! 29 bplustree::insert::_$LT$impl$u20$bplustree..BPlusTreeMap$LT$K$C$V$GT$$GT$::insert_rec::h0fbe71892c4e85cf  (in profile_random_ops) + 436  [0x10246d98c]  insert.rs:67
+                + ! 27 bplustree::insert::_$LT$impl$u20$bplustree..BPlusTreeMap$LT$K$C$V$GT$$GT$::insert_rec::h0fbe71892c4e85cf  (in profile_random_ops) + 1896,1900,...  [0x10246df40,0x10246df44,...]  insert.rs:99
+                + ! 14 bplustree::insert::_$LT$impl$u20$bplustree..BPlusTreeMap$LT$K$C$V$GT$$GT$::insert_rec::h0fbe71892c4e85cf  (in profile_random_ops) + 40  [0x10246d800]  insert.rs:62
+                + ! 6 bplustree::insert::_$LT$impl$u20$bplustree..BPlusTreeMap$LT$K$C$V$GT$$GT$::insert_rec::h0fbe71892c4e85cf  (in profile_random_ops) + 420,424,...  [0x10246d97c,0x10246d980,...]  insert.rs:66
+                + 208 bplustree::insert::_$LT$impl$u20$bplustree..BPlusTreeMap$LT$K$C$V$GT$$GT$::insert_rec::h0fbe71892c4e85cf  (in profile_random_ops) + 352,368,...  [0x10246d938,0x10246d948,...]  insert.rs:65
+                + 53 bplustree::insert::_$LT$impl$u20$bplustree..BPlusTreeMap$LT$K$C$V$GT$$GT$::insert_rec::h0fbe71892c4e85cf  (in profile_random_ops) + 412,428,...  [0x10246d974,0x10246d984,...]  insert.rs:66
+                + 38 bplustree::insert::_$LT$impl$u20$bplustree..BPlusTreeMap$LT$K$C$V$GT$$GT$::insert_rec::h0fbe71892c4e85cf  (in profile_random_ops) + 1900,1896,...  [0x10246df44,0x10246df40,...]  insert.rs:99
+                + 20 bplustree::insert::_$LT$impl$u20$bplustree..BPlusTreeMap$LT$K$C$V$GT$$GT$::insert_rec::h0fbe71892c4e85cf  (in profile_random_ops) + 40,44  [0x10246d800,0x10246d804]  insert.rs:62
+                + 8 bplustree::insert::_$LT$impl$u20$bplustree..BPlusTreeMap$LT$K$C$V$GT$$GT$::insert_rec::h0fbe71892c4e85cf  (in profile_random_ops) + 340  [0x10246d92c]  insert.rs:0
+                + 8 bplustree::insert::_$LT$impl$u20$bplustree..BPlusTreeMap$LT$K$C$V$GT$$GT$::insert_rec::h0fbe71892c4e85cf  (in profile_random_ops) + 24,0  [0x10246d7f0,0x10246d7d8]  insert.rs:60
+                + 4 bplustree::insert::_$LT$impl$u20$bplustree..BPlusTreeMap$LT$K$C$V$GT$$GT$::insert_rec::h0fbe71892c4e85cf  (in profile_random_ops) + 436  [0x10246d98c]  insert.rs:67
+                1791 profile_random_ops::main::hf386d6d9b591e833  (in profile_random_ops) + 700,692,...  [0x10246e278,0x10246e270,...]  profile_random_ops.rs:43
+                1582 profile_random_ops::main::hf386d6d9b591e833  (in profile_random_ops) + 764  [0x10246e2b8]  profile_random_ops.rs:46
+                + 1493 bplustree::delete::_$LT$impl$u20$bplustree..BPlusTreeMap$LT$K$C$V$GT$$GT$::remove_rec::h06b2aec7a12e5fc6  (in profile_random_ops) + 308  [0x10246cc88]  delete.rs:683
+                + ! 1293 bplustree::delete::_$LT$impl$u20$bplustree..BPlusTreeMap$LT$K$C$V$GT$$GT$::remove_rec::h06b2aec7a12e5fc6  (in profile_random_ops) + 308  [0x10246cc88]  delete.rs:683
+                + ! : 1143 bplustree::delete::_$LT$impl$u20$bplustree..BPlusTreeMap$LT$K$C$V$GT$$GT$::remove_rec::h06b2aec7a12e5fc6  (in profile_random_ops) + 308  [0x10246cc88]  delete.rs:683
+                + ! : | 753 bplustree::delete::_$LT$impl$u20$bplustree..BPlusTreeMap$LT$K$C$V$GT$$GT$::remove_rec::h06b2aec7a12e5fc6  (in profile_random_ops) + 632  [0x10246cdcc]  delete.rs:680
+                + ! : | + 753 _platform_memmove  (in libsystem_platform.dylib) + 396,372,...  [0x18ae4144c,0x18ae41434,...]
+                + ! : | 174 bplustree::delete::_$LT$impl$u20$bplustree..BPlusTreeMap$LT$K$C$V$GT$$GT$::remove_rec::h06b2aec7a12e5fc6  (in profile_random_ops) + 136,128,...  [0x10246cbdc,0x10246cbd4,...]  delete.rs:680
+                + ! : | 170 bplustree::delete::_$LT$impl$u20$bplustree..BPlusTreeMap$LT$K$C$V$GT$$GT$::remove_rec::h06b2aec7a12e5fc6  (in profile_random_ops) + 588  [0x10246cda0]  option.rs:0
+                + ! : | 35 bplustree::delete::_$LT$impl$u20$bplustree..BPlusTreeMap$LT$K$C$V$GT$$GT$::remove_rec::h06b2aec7a12e5fc6  (in profile_random_ops) + 648  [0x10246cddc]  delete.rs:680
+                + ! : | + 31 _platform_memmove  (in libsystem_platform.dylib) + 372,396,...  [0x18ae41434,0x18ae4144c,...]
+                + ! : | + 4 DYLD-STUB$$memmove  (in profile_random_ops) + 4  [0x1024a942c]
+                + ! : | 7 bplustree::delete::_$LT$impl$u20$bplustree..BPlusTreeMap$LT$K$C$V$GT$$GT$::remove_rec::h06b2aec7a12e5fc6  (in profile_random_ops) + 36  [0x10246cb78]  delete.rs:679
+                + ! : | 4 bplustree::delete::_$LT$impl$u20$bplustree..BPlusTreeMap$LT$K$C$V$GT$$GT$::remove_rec::h06b2aec7a12e5fc6  (in profile_random_ops) + 0,20  [0x10246cb54,0x10246cb68]  delete.rs:677
+                + ! : 90 bplustree::delete::_$LT$impl$u20$bplustree..BPlusTreeMap$LT$K$C$V$GT$$GT$::remove_rec::h06b2aec7a12e5fc6  (in profile_random_ops) + 240,232,...  [0x10246cc44,0x10246cc3c,...]  delete.rs:682
+                + ! : 19 bplustree::delete::_$LT$impl$u20$bplustree..BPlusTreeMap$LT$K$C$V$GT$$GT$::remove_rec::h06b2aec7a12e5fc6  (in profile_random_ops) + 348,316,...  [0x10246ccb0,0x10246cc90,...]  delete.rs:685
+                + ! : 11 bplustree::delete::_$LT$impl$u20$bplustree..BPlusTreeMap$LT$K$C$V$GT$$GT$::remove_rec::h06b2aec7a12e5fc6  (in profile_random_ops) + 1352,1360,...  [0x10246d09c,0x10246d0a4,...]  delete.rs:690
+                + ! : 9 bplustree::delete::_$LT$impl$u20$bplustree..BPlusTreeMap$LT$K$C$V$GT$$GT$::remove_rec::h06b2aec7a12e5fc6  (in profile_random_ops) + 228  [0x10246cc38]  delete.rs:0
+                + ! : 7 bplustree::delete::_$LT$impl$u20$bplustree..BPlusTreeMap$LT$K$C$V$GT$$GT$::remove_rec::h06b2aec7a12e5fc6  (in profile_random_ops) + 16,0,...  [0x10246cb64,0x10246cb54,...]  delete.rs:677
+                + ! : 6 bplustree::delete::_$LT$impl$u20$bplustree..BPlusTreeMap$LT$K$C$V$GT$$GT$::remove_rec::h06b2aec7a12e5fc6  (in profile_random_ops) + 288  [0x10246cc74]  option.rs:0
+                + ! : 3 bplustree::delete::_$LT$impl$u20$bplustree..BPlusTreeMap$LT$K$C$V$GT$$GT$::remove_rec::h06b2aec7a12e5fc6  (in profile_random_ops) + 36  [0x10246cb78]  delete.rs:679
+                + ! : 2 bplustree::delete::_$LT$impl$u20$bplustree..BPlusTreeMap$LT$K$C$V$GT$$GT$::remove_rec::h06b2aec7a12e5fc6  (in profile_random_ops) + 500  [0x10246cd48]  delete.rs:685
+                + ! : | 1 DYLD-STUB$$memmove  (in profile_random_ops) + 4  [0x1024a942c]
+                + ! : | 1 _platform_memmove  (in libsystem_platform.dylib) + 624  [0x18ae41530]
+                + ! : 1 bplustree::delete::_$LT$impl$u20$bplustree..BPlusTreeMap$LT$K$C$V$GT$$GT$::remove_rec::h06b2aec7a12e5fc6  (in profile_random_ops) + 308  [0x10246cc88]  delete.rs:684
+                + ! : 1 bplustree::delete::_$LT$impl$u20$bplustree..BPlusTreeMap$LT$K$C$V$GT$$GT$::remove_rec::h06b2aec7a12e5fc6  (in profile_random_ops) + 484  [0x10246cd38]  delete.rs:685
+                + ! : | 1 _platform_memmove  (in libsystem_platform.dylib) + 624  [0x18ae41530]
+                + ! : 1 bplustree::delete::_$LT$impl$u20$bplustree..BPlusTreeMap$LT$K$C$V$GT$$GT$::remove_rec::h06b2aec7a12e5fc6  (in profile_random_ops) + 968  [0x10246cf1c]  delete.rs:685
+                + ! :   1 _platform_memmove  (in libsystem_platform.dylib) + 24  [0x18ae412d8]
+                + ! 152 bplustree::delete::_$LT$impl$u20$bplustree..BPlusTreeMap$LT$K$C$V$GT$$GT$::remove_rec::h06b2aec7a12e5fc6  (in profile_random_ops) + 232,240,...  [0x10246cc3c,0x10246cc44,...]  delete.rs:682
+                + ! 11 bplustree::delete::_$LT$impl$u20$bplustree..BPlusTreeMap$LT$K$C$V$GT$$GT$::remove_rec::h06b2aec7a12e5fc6  (in profile_random_ops) + 228  [0x10246cc38]  delete.rs:0
+                + ! 10 bplustree::delete::_$LT$impl$u20$bplustree..BPlusTreeMap$LT$K$C$V$GT$$GT$::remove_rec::h06b2aec7a12e5fc6  (in profile_random_ops) + 0,24,...  [0x10246cb54,0x10246cb6c,...]  delete.rs:677
+                + ! 8 bplustree::delete::_$LT$impl$u20$bplustree..BPlusTreeMap$LT$K$C$V$GT$$GT$::remove_rec::h06b2aec7a12e5fc6  (in profile_random_ops) + 348,660,...  [0x10246ccb0,0x10246cde8,...]  delete.rs:685
+                + ! 8 bplustree::delete::_$LT$impl$u20$bplustree..BPlusTreeMap$LT$K$C$V$GT$$GT$::remove_rec::h06b2aec7a12e5fc6  (in profile_random_ops) + 1364,1368  [0x10246d0a8,0x10246d0ac]  delete.rs:690
+                + ! 7 bplustree::delete::_$LT$impl$u20$bplustree..BPlusTreeMap$LT$K$C$V$GT$$GT$::remove_rec::h06b2aec7a12e5fc6  (in profile_random_ops) + 288  [0x10246cc74]  option.rs:0
+                + ! 3 bplustree::delete::_$LT$impl$u20$bplustree..BPlusTreeMap$LT$K$C$V$GT$$GT$::remove_rec::h06b2aec7a12e5fc6  (in profile_random_ops) + 36  [0x10246cb78]  delete.rs:679
+                + ! 1 bplustree::delete::_$LT$impl$u20$bplustree..BPlusTreeMap$LT$K$C$V$GT$$GT$::remove_rec::h06b2aec7a12e5fc6  (in profile_random_ops) + 1340  [0x10246d090]  mod.rs:0
+                + 34 bplustree::delete::_$LT$impl$u20$bplustree..BPlusTreeMap$LT$K$C$V$GT$$GT$::remove_rec::h06b2aec7a12e5fc6  (in profile_random_ops) + 260,240,...  [0x10246cc58,0x10246cc44,...]  delete.rs:682
+                + 23 bplustree::delete::_$LT$impl$u20$bplustree..BPlusTreeMap$LT$K$C$V$GT$$GT$::remove_rec::h06b2aec7a12e5fc6  (in profile_random_ops) + 1364,1372,...  [0x10246d0a8,0x10246d0b0,...]  delete.rs:690
+                + 18 bplustree::delete::_$LT$impl$u20$bplustree..BPlusTreeMap$LT$K$C$V$GT$$GT$::remove_rec::h06b2aec7a12e5fc6  (in profile_random_ops) + 668,348,...  [0x10246cdf0,0x10246ccb0,...]  delete.rs:685
+                + 9 bplustree::delete::_$LT$impl$u20$bplustree..BPlusTreeMap$LT$K$C$V$GT$$GT$::remove_rec::h06b2aec7a12e5fc6  (in profile_random_ops) + 288  [0x10246cc74]  option.rs:0
+                + 3 bplustree::delete::_$LT$impl$u20$bplustree..BPlusTreeMap$LT$K$C$V$GT$$GT$::remove_rec::h06b2aec7a12e5fc6  (in profile_random_ops) + 36  [0x10246cb78]  delete.rs:679
+                + 1 bplustree::delete::_$LT$impl$u20$bplustree..BPlusTreeMap$LT$K$C$V$GT$$GT$::remove_rec::h06b2aec7a12e5fc6  (in profile_random_ops) + 228  [0x10246cc38]  delete.rs:0
+                + 1 bplustree::delete::_$LT$impl$u20$bplustree..BPlusTreeMap$LT$K$C$V$GT$$GT$::remove_rec::h06b2aec7a12e5fc6  (in profile_random_ops) + 1340  [0x10246d090]  mod.rs:0
+                737 profile_random_ops::main::hf386d6d9b591e833  (in profile_random_ops) + 316,360,...  [0x10246e0f8,0x10246e124,...]  range.rs:0
+                150 profile_random_ops::main::hf386d6d9b591e833  (in profile_random_ops) + 452,592,...  [0x10246e180,0x10246e20c,...]  profile_random_ops.rs:40
+                124 profile_random_ops::main::hf386d6d9b591e833  (in profile_random_ops) + 612  [0x10246e220]  profile_random_ops.rs:41
+                64 profile_random_ops::main::hf386d6d9b591e833  (in profile_random_ops) + 432,408,...  [0x10246e16c,0x10246e154,...]  profile_random_ops.rs:35
+                58 profile_random_ops::main::hf386d6d9b591e833  (in profile_random_ops) + 332,328  [0x10246e108,0x10246e104]  profile_random_ops.rs:0
+                49 profile_random_ops::main::hf386d6d9b591e833  (in profile_random_ops) + 744,792,...  [0x10246e2a4,0x10246e2d4,...]  profile_random_ops.rs:46
+                44 bplustree::insert::_$LT$impl$u20$bplustree..BPlusTreeMap$LT$K$C$V$GT$$GT$::insert_rec::h0fbe71892c4e85cf  (in profile_random_ops) + 1900,1892,...  [0x10246df44,0x10246df3c,...]  insert.rs:99
+                19 profile_random_ops::main::hf386d6d9b591e833  (in profile_random_ops) + 384,376,...  [0x10246e13c,0x10246e134,...]  profile_random_ops.rs:34
+                14 bplustree::delete::_$LT$impl$u20$bplustree..BPlusTreeMap$LT$K$C$V$GT$$GT$::remove_rec::h06b2aec7a12e5fc6  (in profile_random_ops) + 1364  [0x10246d0a8]  delete.rs:690
+                4 profile_random_ops::main::hf386d6d9b591e833  (in profile_random_ops) + 444,448  [0x10246e178,0x10246e17c]  profile_random_ops.rs:37
+                1 profile_random_ops::main::hf386d6d9b591e833  (in profile_random_ops) + 336  [0x10246e10c]  profile_random_ops.rs:33
+
+Total number in stack (recursive counted multiple, when >=5):
+        8       _platform_memmove  (in libsystem_platform.dylib) + 0  [0x18ae412c0]
+        5       bplustree::insert::_$LT$impl$u20$bplustree..BPlusTreeMap$LT$K$C$V$GT$$GT$::insert_rec::h0fbe71892c4e85cf  (in profile_random_ops) + 0  [0x10246d7d8]  insert.rs:99
+
+Sort by top of stack, same collapsed (when >= 5):
+        bplustree::insert::_$LT$impl$u20$bplustree..BPlusTreeMap$LT$K$C$V$GT$$GT$::insert_rec::h0fbe71892c4e85cf  (in profile_random_ops)        3707
+        profile_random_ops::main::hf386d6d9b591e833  (in profile_random_ops)        2997
+        _platform_memmove  (in libsystem_platform.dylib)        868
+        bplustree::delete::_$LT$impl$u20$bplustree..BPlusTreeMap$LT$K$C$V$GT$$GT$::remove_rec::h06b2aec7a12e5fc6  (in profile_random_ops)        804
+        DYLD-STUB$$memmove  (in profile_random_ops)        10
+
+Binary Images:
+       0x10246c000 -        0x1024b900f +profile_random_ops (0) <95873B5F-5A5C-3831-A479-DD63616F3944> /Users/*/profile_random_ops
+       0x18aa0c000 -        0x18aa5f893  libobjc.A.dylib (940.4) <8CA52E4D-F699-3D14-8061-EEA9D4366538> /usr/lib/libobjc.A.dylib
+       0x18aa60000 -        0x18aafb577  dyld (1.0.0 - 1286.10) <3247E185-CED2-36FF-9E29-47A77C23E004> /usr/lib/dyld
+       0x18aafc000 -        0x18aaff168  libsystem_blocks.dylib (96) <BA8F0C40-B12D-3D8B-8396-FC3F8A733C27> /usr/lib/system/libsystem_blocks.dylib
+       0x18ab00000 -        0x18ab4a8ff  libxpc.dylib (2894.140.12) <1B8951EB-68DB-37BA-9581-240B796AA872> /usr/lib/system/libxpc.dylib
+       0x18ab4b000 -        0x18ab667ff  libsystem_trace.dylib (1643.120.5) <AC8466B8-AF1D-3895-876B-228151F0DF1D> /usr/lib/system/libsystem_trace.dylib
+       0x18ab67000 -        0x18ac053b7  libcorecrypto.dylib (1736.140.2) <7254F3F1-A46F-30B6-934A-511B730A8FC7> /usr/lib/system/libcorecrypto.dylib
+       0x18ac06000 -        0x18ac4d06f  libsystem_malloc.dylib (715.140.5) <85947F4E-385D-3B6D-9BF5-844EFE876D53> /usr/lib/system/libsystem_malloc.dylib
+       0x18ac4e000 -        0x18ac9475f  libdispatch.dylib (1521.140.2) <24CE0D89-4114-30C2-A81A-3DB1F5931CFF> /usr/lib/system/libdispatch.dylib
+       0x18ac95000 -        0x18ac97d1b  libsystem_featureflags.dylib (97) <856DB4EF-8C67-3842-970C-6FA814B07749> /usr/lib/system/libsystem_featureflags.dylib
+       0x18ac98000 -        0x18ad19243  libsystem_c.dylib (1698.140.3) <DFEA8794-80CE-37C3-8F6A-108AA1D0B1B0> /usr/lib/system/libsystem_c.dylib
+       0x18ad1a000 -        0x18ada6ff7  libc++.1.dylib (1900.181) <643ED232-CE19-3F63-8015-0AEE768C002F> /usr/lib/libc++.1.dylib
+       0x18ada7000 -        0x18adc4fff  libc++abi.dylib (1900.181) <776A4AFB-71EE-32AB-B2EE-E6FF80818654> /usr/lib/libc++abi.dylib
+       0x18adc5000 -        0x18ae00653  libsystem_kernel.dylib (11417.140.69) <6E4A96AD-04B8-3E8A-B91D-087E62306246> /usr/lib/system/libsystem_kernel.dylib
+       0x18ae01000 -        0x18ae0da47  libsystem_pthread.dylib (536) <D6494BA9-171E-39FC-B1AA-28ECF87975D1> /usr/lib/system/libsystem_pthread.dylib
+       0x18ae0e000 -        0x18ae3dba3  libdyld.dylib (1286.10) <01BCB3F7-AB89-30BD-87EE-91B291EADAE8> /usr/lib/system/libdyld.dylib
+       0x18ae3e000 -        0x18ae45e0b  libsystem_platform.dylib (349.140.6) <FD19A599-8750-31F9-924F-C2810C938371> /usr/lib/system/libsystem_platform.dylib
+       0x18ae46000 -        0x18ae756f7  libsystem_info.dylib (597) <9720B57E-A0DF-3BDD-8149-0801054B5D00> /usr/lib/system/libsystem_info.dylib
+       0x18e90c000 -        0x18e916387  libsystem_darwin.dylib (1698.140.3) <8E58BBDB-E560-3AB4-8A1D-849AB83CBFC5> /usr/lib/system/libsystem_darwin.dylib
+       0x18ed6e000 -        0x18ed7ffeb  libsystem_notify.dylib (342) <6A411086-A1A2-349F-B9CA-348F9DCBB415> /usr/lib/system/libsystem_notify.dylib
+       0x190d71000 -        0x190d8be8f  libsystem_networkextension.dylib (2063.140.6) <8183B684-71EB-3FB1-8378-EB830CADAE7D> /usr/lib/system/libsystem_networkextension.dylib
+       0x190e08000 -        0x190e1ffdb  libsystem_asl.dylib (402) <FE29D1E8-D286-33F9-81CB-822E632D1571> /usr/lib/system/libsystem_asl.dylib
+       0x192965000 -        0x19296d3a7  libsystem_symptoms.dylib (2022.140.4) <AABA26A2-74BC-3219-BAA3-ACC8D81D8589> /usr/lib/system/libsystem_symptoms.dylib
+       0x1961b2000 -        0x1961e238f  libsystem_containermanager.dylib (689.100.6) <24EE4AC1-5C9F-3EE0-8B4E-9D060EBCBD41> /usr/lib/system/libsystem_containermanager.dylib
+       0x197417000 -        0x19741b5df  libsystem_configuration.dylib (1351.140.5) <B1ADB810-702B-3646-8B66-EB2C288FE51A> /usr/lib/system/libsystem_configuration.dylib
+       0x19741c000 -        0x19742247f  libsystem_sandbox.dylib (2401.140.15) <B86C6D35-683E-3156-BAB2-A422F5AFF2BD> /usr/lib/system/libsystem_sandbox.dylib
+       0x198427000 -        0x198429fe3  libquarantine.dylib (181.120.2) <8CE8DAD0-52D6-3F46-98EF-161E1397FB48> /usr/lib/system/libquarantine.dylib
+       0x198b3d000 -        0x198b44033  libsystem_coreservices.dylib (178.6.1) <A4E84D5A-8D0E-3692-B888-89B9EEF8753D> /usr/lib/system/libsystem_coreservices.dylib
+       0x198fbc000 -        0x198ff92b7  libsystem_m.dylib (3291.100.4) <0D060230-BD2F-3C8E-ACB9-8A79F5CD8EDE> /usr/lib/system/libsystem_m.dylib
+       0x198ffb000 -        0x198ffe4e7  libmacho.dylib (1024.3) <87AB4EEF-3A18-3399-A767-C6BF4ECEDCEB> /usr/lib/system/libmacho.dylib
+       0x199018000 -        0x1990255ef  libcommonCrypto.dylib (600035) <E6BC26C2-DED7-3C04-A670-AEDB150BDB1F> /usr/lib/system/libcommonCrypto.dylib
+       0x199026000 -        0x19902fad7  libunwind.dylib (1900.125) <F753CC2B-775B-3567-B0C6-D2989CA9EBF4> /usr/lib/system/libunwind.dylib
+       0x199038000 -        0x19904269f  libcopyfile.dylib (224) <213FA18D-6145-3615-8DB5-906B6863EAB9> /usr/lib/system/libcopyfile.dylib
+       0x199043000 -        0x19904698f  libcompiler_rt.dylib (103.3) <F0F65700-8E9D-35F3-AC32-952D363190BC> /usr/lib/system/libcompiler_rt.dylib
+       0x199047000 -        0x19904ba1b  libsystem_collections.dylib (1698.140.3) <B77BE835-646C-3F05-BDBD-7703DE140F6A> /usr/lib/system/libsystem_collections.dylib
+       0x19904c000 -        0x19904f2c7  libsystem_secinit.dylib (153.140.2) <D15B45AD-1345-34BF-B8E3-05336C4046A0> /usr/lib/system/libsystem_secinit.dylib
+       0x199050000 -        0x199052b6f  libremovefile.dylib (81) <9BCF9A24-BECB-3DED-A78E-3A3ECD1B1757> /usr/lib/system/libremovefile.dylib
+       0x199053000 -        0x199053f27  libkeymgr.dylib (31) <B20C6921-D5BE-3BB5-B68C-32D90D629E39> /usr/lib/system/libkeymgr.dylib
+       0x199054000 -        0x19905cd57  libsystem_dnssd.dylib (2600.140.3) <61F023F3-E2C5-3F19-BA1B-B02D7564ACC4> /usr/lib/system/libsystem_dnssd.dylib
+       0x19905d000 -        0x1990620b3  libcache.dylib (95) <2B900F8F-9EDE-3208-AB17-BD1385B5546A> /usr/lib/system/libcache.dylib
+       0x199063000 -        0x199064ca3  libSystem.B.dylib (1351) <072C7C60-2B6C-3E07-AA56-FD1750EADC2F> /usr/lib/libSystem.B.dylib
+       0x272544000 -        0x27254b109  libRosetta.dylib (349) <4EE80AAC-8204-3BD0-AB75-EDD23DE67E2F> /usr/lib/libRosetta.dylib
+       0x27396f000 -        0x273972deb  libsystem_darwindirectory.dylib (122) <277D32FB-F49A-3949-97A4-B190A3DF89E8> /usr/lib/system/libsystem_darwindirectory.dylib
+       0x273973000 -        0x27397a523  libsystem_eligibility.dylib (181.140.5) <27E48AAA-644F-394A-9F62-49CEFB813716> /usr/lib/system/libsystem_eligibility.dylib
+       0x27397b000 -        0x2739806c5  libsystem_sanitizers.dylib (19) <FB86D2F7-4501-38E4-9D9A-83F960D7D7BA> /usr/lib/system/libsystem_sanitizers.dylib
