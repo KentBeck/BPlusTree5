@@ -1,0 +1,66 @@
+[package]
+name = "bplustree"
+version = "0.1.0"
+edition = "2021"
+description = "Raw-memory B+ tree map with fixed-size nodes"
+license = "MIT"
+
+[lib]
+path = "src/lib.rs"
+
+[dependencies]
+# old_bplustree = { package = "bplustree", path = "vendor/BPlusTree3/rust" }
+
+[features]
+default = ["std", "compat_test_api"]
+std = []
+# Enables test-only compatibility APIs used by the imported test suites.
+compat_test_api = []
+
+[[bin]]
+name = "profile_delete"
+path = "src/bin/profile_delete.rs"
+
+[[bin]]
+name = "profile_delete_std"
+path = "src/bin/profile_delete_std.rs"
+
+[[bin]]
+name = "bench_delete"
+path = "src/bin/bench_delete.rs"
+
+[[bin]]
+name = "profile_delete_detailed"
+path = "src/bin/profile_delete_detailed.rs"
+
+[[bin]]
+name = "profile_delete_small"
+path = "src/bin/profile_delete_small.rs"
+
+[[bin]]
+name = "bench_get"
+path = "src/bin/bench_get.rs"
+
+[[bin]]
+name = "profile_get"
+path = "src/bin/profile_get.rs"
+
+[[bin]]
+name = "profile_get_std"
+path = "src/bin/profile_get_std.rs"
+
+[[bin]]
+name = "profile_get_small"
+path = "src/bin/profile_get_small.rs"
+
+[[bin]]
+name = "bench_iterate"
+path = "src/bin/bench_iterate.rs"
+
+[[bin]]
+name = "profile_iterate"
+path = "src/bin/profile_iterate.rs"
+
+[[bin]]
+name = "profile_iterate_std"
+path = "src/bin/profile_iterate_std.rs"
