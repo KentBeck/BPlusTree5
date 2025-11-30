@@ -79,13 +79,17 @@ def ValidTree (t : BPlusTree K V) : Prop :=
 
 def insert_list (k : K) (v : V) : List K -> List V -> List K × List V
 | [], _ => ([k], [v])
-| k'::ks, [] => ([k, k'], [v]) -- Should not happen in valid tree
+| k'::_, [] => ([k, k'], [v]) -- Should not happen in valid tree
 | k'::ks, v'::vs =>
     if k < k' then (k::k'::ks, v::v'::vs)
     else if k == k' then (k::ks, v::vs) -- Update
     else 
       let (new_ks, new_vs) := insert_list k v ks vs
       (k'::new_ks, v'::new_vs)
+
+theorem insert_list_mem (k : K) (v : V) (keys : List K) (vals : List V) (x : K) :
+  x ∈ (insert_list k v keys vals).1 ↔ x = k ∨ x ∈ keys := by
+  sorry
 
 theorem insert_list_sorted (k : K) (v : V) (keys : List K) (vals : List V) :
   sorted keys -> sorted (insert_list k v keys vals).1 := by
@@ -99,7 +103,7 @@ def insert (t : BPlusTree K V) (k : K) (v : V) : BPlusTree K V :=
   | BPlusTree.leaf keys vals =>
       let (new_keys, new_vals) := insert_leaf keys vals k v
       BPlusTree.leaf new_keys new_vals
-  | BPlusTree.branch keys children =>
+  | BPlusTree.branch _ _ =>
       -- Recursive insert logic
       t -- Placeholder
 
