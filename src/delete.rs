@@ -129,14 +129,13 @@ impl<K: Ord + Clone, V> BPlusTreeMap<K, V> {
              are at or below the minimum fill"
         );
 
-        core::ptr::copy_nonoverlapping(
+        self.move_kv_range(
             s.keys_ptr as *const K,
-            (t.keys_ptr as *mut K).add(target_len),
-            source_len,
-        );
-        core::ptr::copy_nonoverlapping(
             s.vals_ptr as *const V,
-            (t.vals_ptr as *mut V).add(target_len),
+            0,
+            t.keys_ptr as *mut K,
+            t.vals_ptr as *mut V,
+            target_len,
             source_len,
         );
 
@@ -198,6 +197,10 @@ impl<K: Ord + Clone, V> BPlusTreeMap<K, V> {
         }
     }
 
+    /// Restore minimum fill for `children[child_idx]` after a removal:
+    /// borrow from a sibling that can spare an entry, else merge with one.
+    /// `rebalance_branch_child` is its structural twin; null siblings can
+    /// occur at the root while `check_root_collapse` is mid-repair.
     unsafe fn rebalance_leaf_child(
         &mut self,
         branch: NonNull<u8>,
@@ -207,41 +210,23 @@ impl<K: Ord + Clone, V> BPlusTreeMap<K, V> {
         let parts = layout::carve_branch::<K>(branch, &self.branch_layout);
         let children = parts.children_ptr as *mut *mut u8;
 
-        let child_ptr = *children.add(child_idx);
-        let child = NonNull::new_unchecked(child_ptr);
-        let child_parts = layout::carve_leaf::<K, V>(child, &self.leaf_layout);
-        let child_len = (*child_parts.hdr).len as usize;
+        let child = NonNull::new_unchecked(*children.add(child_idx));
         let min = self.min_leaf_len();
-        if child_len >= min {
+        if self.node_len(child) >= min {
             return;
         }
 
         if child_idx > 0 {
-            let left_ptr = *children.add(child_idx - 1);
-            if let Some(left) = NonNull::new(left_ptr) {
-                let left_hdr = &*(left_ptr as *const NodeHdr);
-                if left_hdr.tag == NodeTag::Leaf {
-                    let left_parts = layout::carve_leaf::<K, V>(left, &self.leaf_layout);
-                    let left_len = (*left_parts.hdr).len as usize;
-                    if left_len > min {
-                        self.rotate_leaf_right(branch, child_idx - 1);
-                        return;
-                    }
+            if let Some(left) = NonNull::new(*children.add(child_idx - 1)) {
+                if self.node_len(left) > min {
+                    return self.rotate_leaf_right(branch, child_idx - 1);
                 }
             }
         }
-
         if child_idx < branch_len {
-            let right_ptr = *children.add(child_idx + 1);
-            if let Some(right) = NonNull::new(right_ptr) {
-                let right_hdr = &*(right_ptr as *const NodeHdr);
-                if right_hdr.tag == NodeTag::Leaf {
-                    let right_parts = layout::carve_leaf::<K, V>(right, &self.leaf_layout);
-                    let right_len = (*right_parts.hdr).len as usize;
-                    if right_len > min {
-                        self.rotate_leaf_left(branch, child_idx);
-                        return;
-                    }
+            if let Some(right) = NonNull::new(*children.add(child_idx + 1)) {
+                if self.node_len(right) > min {
+                    return self.rotate_leaf_left(branch, child_idx);
                 }
             }
         }
@@ -253,6 +238,7 @@ impl<K: Ord + Clone, V> BPlusTreeMap<K, V> {
         }
     }
 
+    /// Structural twin of `rebalance_leaf_child`.
     unsafe fn rebalance_branch_child(
         &mut self,
         branch: NonNull<u8>,
@@ -262,35 +248,23 @@ impl<K: Ord + Clone, V> BPlusTreeMap<K, V> {
         let parts = layout::carve_branch::<K>(branch, &self.branch_layout);
         let children = parts.children_ptr as *mut *mut u8;
 
-        let child_ptr = *children.add(child_idx);
-        let child = NonNull::new_unchecked(child_ptr);
-        let child_parts = layout::carve_branch::<K>(child, &self.branch_layout);
-        let child_len = (*child_parts.hdr).len as usize;
+        let child = NonNull::new_unchecked(*children.add(child_idx));
         let min = self.min_branch_len();
-        if child_len >= min {
+        if self.node_len(child) >= min {
             return;
         }
 
         if child_idx > 0 {
-            let left_ptr = *children.add(child_idx - 1);
-            if let Some(left) = NonNull::new(left_ptr) {
-                let left_parts = layout::carve_branch::<K>(left, &self.branch_layout);
-                let left_len = (*left_parts.hdr).len as usize;
-                if left_len > min {
-                    self.rotate_branch_right(branch, child_idx - 1);
-                    return;
+            if let Some(left) = NonNull::new(*children.add(child_idx - 1)) {
+                if self.node_len(left) > min {
+                    return self.rotate_branch_right(branch, child_idx - 1);
                 }
             }
         }
-
         if child_idx < branch_len {
-            let right_ptr = *children.add(child_idx + 1);
-            if let Some(right) = NonNull::new(right_ptr) {
-                let right_parts = layout::carve_branch::<K>(right, &self.branch_layout);
-                let right_len = (*right_parts.hdr).len as usize;
-                if right_len > min {
-                    self.rotate_branch_left(branch, child_idx);
-                    return;
+            if let Some(right) = NonNull::new(*children.add(child_idx + 1)) {
+                if self.node_len(right) > min {
+                    return self.rotate_branch_left(branch, child_idx);
                 }
             }
         }

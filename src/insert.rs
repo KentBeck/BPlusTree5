@@ -114,19 +114,11 @@ impl<K: Ord + Clone, V> BPlusTreeMap<K, V> {
         let cur_len = (*b.hdr).len as usize;
         let cap = self.branch_layout.cap as usize;
         if cur_len < cap {
-            core::ptr::copy(
-                b.keys_ptr.add(child_idx) as *mut K,
-                b.keys_ptr.add(child_idx + 1) as *mut K,
-                cur_len - child_idx,
-            );
-            self.write_key_at(b.keys_ptr as *mut K, child_idx, sep_key);
-            let cbase = b.children_ptr as *mut *mut u8;
-            core::ptr::copy(
-                cbase.add(child_idx + 1),
-                cbase.add(child_idx + 2),
-                cur_len - child_idx,
-            );
-            *cbase.add(child_idx + 1) = right.as_ptr();
+            let keys = b.keys_ptr as *mut K;
+            let children = b.children_ptr as *mut *mut u8;
+            self.branch_open_gap(keys, children, child_idx, cur_len);
+            self.write_key_at(keys, child_idx, sep_key);
+            *children.add(child_idx + 1) = right.as_ptr();
             (*b.hdr).len = (cur_len + 1) as u16;
             InsertResult::NoSplit(old_value)
         } else {
@@ -366,23 +358,19 @@ impl<K: Ord + Clone, V> BPlusTreeMap<K, V> {
                         left_count
                     };
 
-                    // Move items [left_keep..len) to right at positions [0..) using bulk copy
+                    // Move items [left_keep..len) to the right leaf: the
+                    // inverse of merge_leaf_into.
                     let move_count = len - left_keep;
-                    let mut right_len = 0usize;
-                    if move_count > 0 {
-                        // Bulk move keys and values
-                        core::ptr::copy_nonoverlapping(
-                            (parts.keys_ptr as *const K).add(left_keep),
-                            r.keys_ptr as *mut K,
-                            move_count,
-                        );
-                        core::ptr::copy_nonoverlapping(
-                            (parts.vals_ptr as *const V).add(left_keep),
-                            r.vals_ptr as *mut V,
-                            move_count,
-                        );
-                        right_len = move_count;
-                    }
+                    self.move_kv_range(
+                        parts.keys_ptr as *const K,
+                        parts.vals_ptr as *const V,
+                        left_keep,
+                        r.keys_ptr as *mut K,
+                        r.vals_ptr as *mut V,
+                        0,
+                        move_count,
+                    );
+                    let right_len = move_count;
 
                     // Insert new item into the correct side
                     if insert_pos < left_count {

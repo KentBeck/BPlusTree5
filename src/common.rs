@@ -12,6 +12,13 @@ pub(crate) struct ValidationState<K> {
 }
 
 impl<K, V> BPlusTreeMap<K, V> {
+    /// Number of keys a node currently holds. The header is shared by both
+    /// node kinds, so this works for leaves and branches alike.
+    #[inline(always)]
+    pub(crate) unsafe fn node_len(&self, node: NonNull<u8>) -> usize {
+        (*(node.as_ptr() as *const NodeHdr)).len as usize
+    }
+
     #[inline(always)]
     pub(crate) unsafe fn shift_right(
         &self,
@@ -44,18 +51,6 @@ impl<K, V> BPlusTreeMap<K, V> {
         core::ptr::write(keys_ptr.add(idx), key);
     }
 
-    #[inline(always)]
-    pub(crate) unsafe fn read_kv_at(
-        &self,
-        keys_ptr: *const K,
-        vals_ptr: *const V,
-        idx: usize,
-    ) -> (K, V) {
-        let k = core::ptr::read(keys_ptr.add(idx));
-        let v = core::ptr::read(vals_ptr.add(idx));
-        (k, v)
-    }
-
     #[inline]
     pub(crate) unsafe fn key_clone_at(&self, keys_ptr: *const K, idx: usize) -> K
     where
@@ -73,6 +68,24 @@ impl<K, V> BPlusTreeMap<K, V> {
         target: &T,
     ) -> Result<usize, usize> {
         keys.binary_search(target)
+    }
+
+    /// Bulk-move `count` key/value pairs from one node's arrays to another's.
+    /// Both halves of the split/merge inverse pair use this. Source slots are
+    /// left logically vacated: occupancy is defined by hdr.len.
+    #[inline(always)]
+    pub(crate) unsafe fn move_kv_range(
+        &self,
+        src_keys: *const K,
+        src_vals: *const V,
+        src_idx: usize,
+        dst_keys: *mut K,
+        dst_vals: *mut V,
+        dst_idx: usize,
+        count: usize,
+    ) {
+        core::ptr::copy_nonoverlapping(src_keys.add(src_idx), dst_keys.add(dst_idx), count);
+        core::ptr::copy_nonoverlapping(src_vals.add(src_idx), dst_vals.add(dst_idx), count);
     }
 
     /// Move a key-value pair from one location to another. The source slot is
