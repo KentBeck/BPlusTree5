@@ -224,7 +224,7 @@ impl<K: Ord + Clone, V> BPlusTreeMap<K, V> {
                     let left_parts = layout::carve_leaf::<K, V>(left, &self.leaf_layout);
                     let left_len = (*left_parts.hdr).len as usize;
                     if left_len > min {
-                        self.borrow_from_left_leaf(branch, child_idx);
+                        self.rotate_leaf_right(branch, child_idx - 1);
                         return;
                     }
                 }
@@ -239,7 +239,7 @@ impl<K: Ord + Clone, V> BPlusTreeMap<K, V> {
                     let right_parts = layout::carve_leaf::<K, V>(right, &self.leaf_layout);
                     let right_len = (*right_parts.hdr).len as usize;
                     if right_len > min {
-                        self.borrow_from_right_leaf(branch, child_idx);
+                        self.rotate_leaf_left(branch, child_idx);
                         return;
                     }
                 }
@@ -277,7 +277,7 @@ impl<K: Ord + Clone, V> BPlusTreeMap<K, V> {
                 let left_parts = layout::carve_branch::<K>(left, &self.branch_layout);
                 let left_len = (*left_parts.hdr).len as usize;
                 if left_len > min {
-                    self.borrow_from_left_branch(branch, child_idx);
+                    self.rotate_branch_right(branch, child_idx - 1);
                     return;
                 }
             }
@@ -289,7 +289,7 @@ impl<K: Ord + Clone, V> BPlusTreeMap<K, V> {
                 let right_parts = layout::carve_branch::<K>(right, &self.branch_layout);
                 let right_len = (*right_parts.hdr).len as usize;
                 if right_len > min {
-                    self.borrow_from_right_branch(branch, child_idx);
+                    self.rotate_branch_left(branch, child_idx);
                     return;
                 }
             }
@@ -302,85 +302,77 @@ impl<K: Ord + Clone, V> BPlusTreeMap<K, V> {
         }
     }
 
-    unsafe fn borrow_from_left_branch(&mut self, branch: NonNull<u8>, child_idx: usize) {
+    /// Rotate one entry rightward through separator `sep_idx`: the left
+    /// child's last key moves up to the parent, the old separator moves down
+    /// as the right child's first key, and the left child's last subtree
+    /// travels with it. A pass-through: contrast the leaf rotations, which
+    /// re-derive the separator from data.
+    unsafe fn rotate_branch_right(&mut self, branch: NonNull<u8>, sep_idx: usize) {
         let parts = layout::carve_branch::<K>(branch, &self.branch_layout);
         let children = parts.children_ptr as *mut *mut u8;
+        let left = NonNull::new_unchecked(*children.add(sep_idx));
+        let right = NonNull::new_unchecked(*children.add(sep_idx + 1));
 
-        let left_ptr = *children.add(child_idx - 1);
-        let child_ptr = *children.add(child_idx);
-        let left = NonNull::new_unchecked(left_ptr);
-        let child = NonNull::new_unchecked(child_ptr);
+        let l = layout::carve_branch::<K>(left, &self.branch_layout);
+        let r = layout::carve_branch::<K>(right, &self.branch_layout);
+        let left_len = (*l.hdr).len as usize;
+        let right_len = (*r.hdr).len as usize;
+        debug_assert!(left_len > 1, "donor would fall below minimum fill");
 
-        let left_parts = layout::carve_branch::<K>(left, &self.branch_layout);
-        let child_parts = layout::carve_branch::<K>(child, &self.branch_layout);
+        let l_keys = l.keys_ptr as *mut K;
+        let l_children = l.children_ptr as *mut *mut u8;
+        let r_keys = r.keys_ptr as *mut K;
+        let r_children = r.children_ptr as *mut *mut u8;
+        let sep_slot = (parts.keys_ptr as *mut K).add(sep_idx);
 
-        let left_len = (*left_parts.hdr).len as usize;
-        let child_len = (*child_parts.hdr).len as usize;
+        let promoted = core::ptr::read(l_keys.add(left_len - 1));
+        let moved_child = *l_children.add(left_len);
+        (*l.hdr).len = (left_len - 1) as u16;
 
-        let sep_slot = (parts.keys_ptr as *mut K).add(child_idx - 1);
-        let parent_key = core::ptr::read(sep_slot);
+        // Open the right child's slot 0 for the incoming key and child.
+        core::ptr::copy(r_keys, r_keys.add(1), right_len);
+        core::ptr::copy(r_children, r_children.add(1), right_len + 1);
+        core::ptr::write(r_keys, core::ptr::read(sep_slot));
+        *r_children = moved_child;
+        (*r.hdr).len = (right_len + 1) as u16;
 
-        let left_keys = left_parts.keys_ptr as *mut K;
-        let left_children = left_parts.children_ptr as *mut *mut u8;
-
-        let borrowed_key = core::ptr::read(left_keys.add(left_len - 1));
-
-        let borrowed_child = *left_children.add(left_len);
-        (*left_parts.hdr).len = (left_len - 1) as u16;
-        *left_children.add(left_len) = ptr::null_mut();
-
-        let child_keys = child_parts.keys_ptr as *mut K;
-        let child_children = child_parts.children_ptr as *mut *mut u8;
-        if child_len > 0 {
-            core::ptr::copy(child_keys, child_keys.add(1), child_len);
-        }
-        core::ptr::copy(child_children, child_children.add(1), child_len + 1);
-        core::ptr::write(child_keys, parent_key);
-        *child_children.add(0) = borrowed_child;
-        (*child_parts.hdr).len = (child_len + 1) as u16;
-
-        core::ptr::write(sep_slot, borrowed_key);
+        core::ptr::write(sep_slot, promoted);
     }
 
-    unsafe fn borrow_from_right_branch(&mut self, branch: NonNull<u8>, child_idx: usize) {
+    /// Mirror of `rotate_branch_right`: the right child's first key moves up,
+    /// the old separator moves down as the left child's last key, and the
+    /// right child's first subtree travels with it.
+    unsafe fn rotate_branch_left(&mut self, branch: NonNull<u8>, sep_idx: usize) {
         let parts = layout::carve_branch::<K>(branch, &self.branch_layout);
         let children = parts.children_ptr as *mut *mut u8;
+        let left = NonNull::new_unchecked(*children.add(sep_idx));
+        let right = NonNull::new_unchecked(*children.add(sep_idx + 1));
 
-        let child_ptr = *children.add(child_idx);
-        let right_ptr = *children.add(child_idx + 1);
-        let child = NonNull::new_unchecked(child_ptr);
-        let right = NonNull::new_unchecked(right_ptr);
+        let l = layout::carve_branch::<K>(left, &self.branch_layout);
+        let r = layout::carve_branch::<K>(right, &self.branch_layout);
+        let left_len = (*l.hdr).len as usize;
+        let right_len = (*r.hdr).len as usize;
+        debug_assert!(right_len > 1, "donor would fall below minimum fill");
 
-        let child_parts = layout::carve_branch::<K>(child, &self.branch_layout);
-        let right_parts = layout::carve_branch::<K>(right, &self.branch_layout);
+        let l_keys = l.keys_ptr as *mut K;
+        let l_children = l.children_ptr as *mut *mut u8;
+        let r_keys = r.keys_ptr as *mut K;
+        let r_children = r.children_ptr as *mut *mut u8;
+        let sep_slot = (parts.keys_ptr as *mut K).add(sep_idx);
 
-        let child_len = (*child_parts.hdr).len as usize;
-        let right_len = (*right_parts.hdr).len as usize;
+        let promoted = core::ptr::read(r_keys);
+        let moved_child = *r_children;
 
-        let sep_slot = (parts.keys_ptr as *mut K).add(child_idx);
-        let parent_key = core::ptr::read(sep_slot);
+        core::ptr::write(l_keys.add(left_len), core::ptr::read(sep_slot));
+        *l_children.add(left_len + 1) = moved_child;
+        (*l.hdr).len = (left_len + 1) as u16;
 
-        let right_keys = right_parts.keys_ptr as *mut K;
-        let right_children = right_parts.children_ptr as *mut *mut u8;
+        // Close the right child's slot 0 after the outgoing key and child.
+        core::ptr::copy(r_keys.add(1), r_keys, right_len - 1);
+        core::ptr::copy(r_children.add(1), r_children, right_len);
+        (*r.hdr).len = (right_len - 1) as u16;
 
-        let new_sep = core::ptr::read(right_keys.add(0));
-
-        let transfer_child = *right_children.add(0);
-
-        let child_keys = child_parts.keys_ptr as *mut K;
-        let child_children = child_parts.children_ptr as *mut *mut u8;
-        core::ptr::write(child_keys.add(child_len), parent_key);
-        *child_children.add(child_len + 1) = transfer_child;
-        (*child_parts.hdr).len = (child_len + 1) as u16;
-
-        if right_len > 1 {
-            core::ptr::copy(right_keys.add(1), right_keys, right_len - 1);
-        }
-        core::ptr::copy(right_children.add(1), right_children, right_len);
-        *right_children.add(right_len) = ptr::null_mut();
-        (*right_parts.hdr).len = (right_len - 1) as u16;
-
-        core::ptr::write(sep_slot, new_sep);
+        core::ptr::write(sep_slot, promoted);
     }
 
     /// Merge the two children flanking separator `left_idx`:
@@ -421,99 +413,70 @@ impl<K: Ord + Clone, V> BPlusTreeMap<K, V> {
         (*parts.hdr).len = 0;
     }
 
-    unsafe fn borrow_from_left_leaf(&mut self, branch: NonNull<u8>, child_idx: usize) {
+    /// Rotate one item rightward through separator `sep_idx`: the left
+    /// child's last item becomes the right child's first. Leaves re-derive
+    /// the separator from the right child's new first key (contrast the
+    /// branch rotations, which pass the separator through).
+    unsafe fn rotate_leaf_right(&mut self, branch: NonNull<u8>, sep_idx: usize) {
         let parts = layout::carve_branch::<K>(branch, &self.branch_layout);
-        let keys = parts.keys_ptr as *mut K;
         let children = parts.children_ptr as *mut *mut u8;
+        let left = NonNull::new_unchecked(*children.add(sep_idx));
+        let right = NonNull::new_unchecked(*children.add(sep_idx + 1));
 
-        let left_ptr = *children.add(child_idx - 1);
-        let child_ptr = *children.add(child_idx);
-        let left = NonNull::new_unchecked(left_ptr);
-        let child = NonNull::new_unchecked(child_ptr);
+        let l = layout::carve_leaf::<K, V>(left, &self.leaf_layout);
+        let r = layout::carve_leaf::<K, V>(right, &self.leaf_layout);
+        let left_len = (*l.hdr).len as usize;
+        let right_len = (*r.hdr).len as usize;
+        debug_assert!(left_len > 1, "donor would fall below minimum fill");
 
-        let left_parts = layout::carve_leaf::<K, V>(left, &self.leaf_layout);
-        let child_parts = layout::carve_leaf::<K, V>(child, &self.leaf_layout);
-
-        let left_len = (*left_parts.hdr).len as usize;
-        let child_len = (*child_parts.hdr).len as usize;
-
-        // Shift child items right first to make room
-        self.shift_right(
-            child_parts.keys_ptr as *mut K,
-            child_parts.vals_ptr as *mut V,
-            0,
-            child_len,
-        );
-
-        // CRITICAL FIX: Use safe move operation to transfer key-value from left to child
-        // This ensures the source slot is properly cleared to prevent double-free
+        self.shift_right(r.keys_ptr as *mut K, r.vals_ptr as *mut V, 0, right_len);
         self.move_kv_at(
-            left_parts.keys_ptr as *mut K,
-            left_parts.vals_ptr as *mut V,
+            l.keys_ptr as *mut K,
+            l.vals_ptr as *mut V,
             left_len - 1,
-            child_parts.keys_ptr as *mut K,
-            child_parts.vals_ptr as *mut V,
+            r.keys_ptr as *mut K,
+            r.vals_ptr as *mut V,
             0,
         );
+        (*l.hdr).len = (left_len - 1) as u16;
+        (*r.hdr).len = (right_len + 1) as u16;
 
-        // Update lengths after the move
-        (*left_parts.hdr).len = (left_len - 1) as u16;
-        (*child_parts.hdr).len = (child_len + 1) as u16;
-
-        let new_sep = self.key_clone_at(child_parts.keys_ptr as *const K, 0);
-        let sep_slot = keys.add(child_idx - 1);
-        let old_sep = core::ptr::read(sep_slot);
-        drop(old_sep);
+        let new_sep = self.key_clone_at(r.keys_ptr as *const K, 0);
+        let sep_slot = (parts.keys_ptr as *mut K).add(sep_idx);
+        drop(core::ptr::read(sep_slot));
         core::ptr::write(sep_slot, new_sep);
     }
 
-    unsafe fn borrow_from_right_leaf(&mut self, branch: NonNull<u8>, child_idx: usize) {
+    /// Mirror of `rotate_leaf_right`: the right child's first item becomes
+    /// the left child's last, and the separator is re-derived from the right
+    /// child's new first key.
+    unsafe fn rotate_leaf_left(&mut self, branch: NonNull<u8>, sep_idx: usize) {
         let parts = layout::carve_branch::<K>(branch, &self.branch_layout);
-        let keys = parts.keys_ptr as *mut K;
         let children = parts.children_ptr as *mut *mut u8;
+        let left = NonNull::new_unchecked(*children.add(sep_idx));
+        let right = NonNull::new_unchecked(*children.add(sep_idx + 1));
 
-        let child_ptr = *children.add(child_idx);
-        let right_ptr = *children.add(child_idx + 1);
-        let child = NonNull::new_unchecked(child_ptr);
-        let right = NonNull::new_unchecked(right_ptr);
+        let l = layout::carve_leaf::<K, V>(left, &self.leaf_layout);
+        let r = layout::carve_leaf::<K, V>(right, &self.leaf_layout);
+        let left_len = (*l.hdr).len as usize;
+        let right_len = (*r.hdr).len as usize;
+        debug_assert!(right_len > 1, "donor would fall below minimum fill");
 
-        let child_parts = layout::carve_leaf::<K, V>(child, &self.leaf_layout);
-        let right_parts = layout::carve_leaf::<K, V>(right, &self.leaf_layout);
-
-        let child_len = (*child_parts.hdr).len as usize;
-        let right_len = (*right_parts.hdr).len as usize;
-
-        // CRITICAL FIX: Use safe move operation to transfer key-value from right to child
         self.move_kv_at(
-            right_parts.keys_ptr as *mut K,
-            right_parts.vals_ptr as *mut V,
+            r.keys_ptr as *mut K,
+            r.vals_ptr as *mut V,
             0,
-            child_parts.keys_ptr as *mut K,
-            child_parts.vals_ptr as *mut V,
-            child_len,
+            l.keys_ptr as *mut K,
+            l.vals_ptr as *mut V,
+            left_len,
         );
-        (*child_parts.hdr).len = (child_len + 1) as u16;
+        self.shift_left_kv(r.keys_ptr as *mut K, r.vals_ptr as *mut V, 0, right_len - 1);
+        (*l.hdr).len = (left_len + 1) as u16;
+        (*r.hdr).len = (right_len - 1) as u16;
 
-        // Shift remaining items in right leaf left to fill the gap
-        if right_len > 1 {
-            core::ptr::copy(
-                right_parts.keys_ptr.add(1) as *const K,
-                right_parts.keys_ptr as *mut K,
-                right_len - 1,
-            );
-            core::ptr::copy(
-                right_parts.vals_ptr.add(1) as *const V,
-                right_parts.vals_ptr as *mut V,
-                right_len - 1,
-            );
-        }
-        // If right_len == 1, we've already transferred the only item, so nothing to drop
-        (*right_parts.hdr).len = (right_len - 1) as u16;
-
-        let new_sep = self.key_clone_at(right_parts.keys_ptr as *const K, 0);
-        let sep_slot = keys.add(child_idx);
-        let old_sep = core::ptr::read(sep_slot);
-        drop(old_sep);
+        let new_sep = self.key_clone_at(r.keys_ptr as *const K, 0);
+        let sep_slot = (parts.keys_ptr as *mut K).add(sep_idx);
+        drop(core::ptr::read(sep_slot));
         core::ptr::write(sep_slot, new_sep);
     }
 
