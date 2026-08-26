@@ -1,0 +1,52 @@
+name: CI
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  test:
+    name: Build & test (stable)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      # Builds every target (lib, tests, benches, profiling bins) and runs the
+      # full suite, including the default differential fuzz configurations.
+      - name: cargo test
+        run: cargo test
+      # Extended differential fuzz vs std::BTreeMap: ~3.2M ops across 160
+      # seed/capacity configs with invariant checks and drop tracking.
+      - name: Extended differential fuzz (release)
+        run: cargo test --release --test differential_fuzz -- --ignored
+
+  miri:
+    name: Miri (undefined behavior check)
+    runs-on: ubuntu-latest
+    # The Miri jobs finish in a few minutes; a hang should fail fast, not
+    # consume the 6-hour default.
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@nightly
+        with:
+          components: miri
+      - uses: Swatinem/rust-cache@v2
+      - name: Miri on memory-safety-critical suites
+        run: |
+          cargo miri test --test differential_fuzz
+          cargo miri test --test drop_and_clear_tests -- --include-ignored
+          cargo miri test --test memory_safety_audit
+          cargo miri test --test borrowing_double_free_test

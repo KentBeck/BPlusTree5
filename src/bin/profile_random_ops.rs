@@ -30,7 +30,7 @@ fn main() {
     println!("Running {} random operations...", n_ops);
     let start = Instant::now();
 
-    for i in 0..n_ops {
+    for _i in 0..n_ops {
         let op = rng.next_range(100);
         let key = rng.next_range(max_key);
 

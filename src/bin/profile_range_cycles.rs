@@ -15,7 +15,7 @@ unsafe fn rdtsc() -> u64 {
 #[cfg(target_arch = "x86_64")]
 fn main() {
     let n = 1_000_000;
-    let mut map = BPlusTreeMap::with_cache_lines(2, 2);
+    let mut map = BPlusTreeMap::new(128).expect("capacity");
 
     println!("Building tree with {} elements...", n);
     for i in 0..n {
@@ -73,7 +73,7 @@ fn main() {
     }
 
     // Measure just the iteration loop (skip first element)
-    let _iter_cycles = 0u64;
+    let mut iter_cycles = 0u64;
     for _ in 0..iterations {
         let mut iter = map.range(start..end);
         iter.next(); // Skip first
@@ -84,13 +84,13 @@ fn main() {
         }
         let t1 = unsafe { rdtsc() };
         black_box(sum);
-        _iter_cycles += t1.saturating_sub(t0);
+        iter_cycles += t1.saturating_sub(t0);
     }
 
     let avg_create = create_cycles / iterations as u64;
     let avg_init = (init_cycles - create_cycles) / iterations as u64;
     let avg_total = total_cycles / iterations as u64;
-    let avg_iter = (total_cycles - init_cycles) / iterations as u64;
+    let avg_iter = iter_cycles / iterations as u64;
     let avg_per_elem = avg_iter / 99; // 99 remaining elements
 
     println!("Average CPU cycles per iteration:");

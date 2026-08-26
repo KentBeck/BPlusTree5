@@ -1,227 +1,121 @@
-use alloc::vec::IntoIter;
-use alloc::vec::Vec;
 use core::ops::{Bound, RangeBounds};
 use core::ptr::NonNull;
 
 use crate::layout;
-use crate::{BPlusTreeMap, NodeHdr, NodeTag};
+use crate::BPlusTreeMap;
 
-pub enum ItemsInner<'a, K, V> {
-    Lazy {
-        tree: &'a BPlusTreeMap<K, V>,
-        front_leaf: Option<NonNull<u8>>,
-        front_idx: usize,
-        back_leaf: Option<NonNull<u8>>,
-        back_idx: usize,
-        remaining: usize,
-        start_bound: Bound<K>,
-        end_bound: Bound<K>,
-        initialized: bool,
-    },
-    Vec {
-        inner: IntoIter<(&'a K, &'a V)>,
-    },
-}
-
+/// Lazy double-ended iterator over key/value pairs.
+///
+/// Both endpoints are resolved to concrete (leaf, index) positions at
+/// construction, so per-item work is an index compare plus two pointer
+/// reads — no key comparisons, no re-carving the leaf. The front and back
+/// cursors meet in the middle; `front_leaf == None` means exhausted.
 pub struct Items<'a, K, V> {
-    pub(crate) inner: ItemsInner<'a, K, V>,
+    tree: &'a BPlusTreeMap<K, V>,
+    front_leaf: Option<NonNull<u8>>,
+    front_idx: usize,
+    front_len: usize,
+    front_keys: *const K,
+    front_vals: *const V,
+    // Meaningful only while front_leaf is Some.
+    back_leaf: NonNull<u8>,
+    back_idx: usize,
+    back_keys: *const K,
+    back_vals: *const V,
 }
 
 impl<'a, K: Ord, V> Iterator for Items<'a, K, V> {
     type Item = (&'a K, &'a V);
 
     fn next(&mut self) -> Option<Self::Item> {
-        match &mut self.inner {
-            ItemsInner::Lazy {
-                tree,
-                front_leaf,
-                front_idx,
-                remaining,
-                start_bound,
-                end_bound,
-                initialized,
-                ..
-            } => {
-                // Lazy initialization on first call
-                if !*initialized {
-                    *initialized = true;
-                    let is_excluded = matches!(start_bound, Bound::Excluded(_));
-                    match start_bound {
-                        Bound::Unbounded => {
-                            *front_leaf = tree.leftmost_leaf();
-                            *front_idx = 0;
-                        }
-                        Bound::Included(k) | Bound::Excluded(k) => {
-                            let leaf_opt = tree.leaf_for_key(k);
-                            if let Some(leaf) = leaf_opt {
-                                unsafe {
-                                    let parts = layout::carve_leaf::<K, V>(leaf, &tree.leaf_layout);
-                                    let len = (*parts.hdr).len as usize;
-                                    let keys = core::slice::from_raw_parts(
-                                        parts.keys_ptr as *const K,
-                                        len,
-                                    );
+        loop {
+            let leaf = self.front_leaf?;
+            let same = leaf == self.back_leaf;
+            let limit = if same { self.back_idx } else { self.front_len };
 
-                                    match keys.binary_search(k) {
-                                        Ok(i) => {
-                                            let idx = if is_excluded { i + 1 } else { i };
-                                            if idx >= len {
-                                                // Move to next leaf
-                                                let next_ptr = *parts.next_ptr;
-                                                *front_leaf = NonNull::new(next_ptr);
-                                                *front_idx = 0;
-                                            } else {
-                                                *front_leaf = Some(leaf);
-                                                *front_idx = idx;
-                                            }
-                                        }
-                                        Err(i) => {
-                                            if i >= len {
-                                                // Move to next leaf
-                                                let next_ptr = *parts.next_ptr;
-                                                *front_leaf = NonNull::new(next_ptr);
-                                                *front_idx = 0;
-                                            } else {
-                                                *front_leaf = Some(leaf);
-                                                *front_idx = i;
-                                            }
-                                        }
-                                    }
-                                }
-                            } else {
-                                *front_leaf = None;
-                                *front_idx = 0;
-                            }
-                        }
-                    }
+            if self.front_idx < limit {
+                unsafe {
+                    let k = &*self.front_keys.add(self.front_idx);
+                    let v = &*self.front_vals.add(self.front_idx);
+                    self.front_idx += 1;
+                    return Some((k, v));
                 }
+            }
 
-                // Loop to handle leaf boundary crossing without recursion
-                loop {
-                    let leaf = (*front_leaf)?;
-                    unsafe {
-                        let parts = layout::carve_leaf::<K, V>(leaf, &tree.leaf_layout);
-                        let len = (*parts.hdr).len as usize;
+            if same {
+                self.front_leaf = None;
+                return None;
+            }
 
-                        if *front_idx < len {
-                            let k = &*(parts.keys_ptr.add(*front_idx) as *const K);
-
-                            // Check end bound
-                            let within_bound = match end_bound {
-                                Bound::Unbounded => true,
-                                Bound::Included(e) => k <= e,
-                                Bound::Excluded(e) => k < e,
-                            };
-
-                            if !within_bound {
-                                *front_leaf = None;
-                                *remaining = 0;
-                                return None;
-                            }
-
-                            let v = &*(parts.vals_ptr.add(*front_idx) as *const V);
-                            *front_idx += 1;
-                            if *remaining > 0 {
-                                *remaining -= 1;
-                            }
-                            return Some((k, v));
-                        }
-
-                        // Move to next leaf
-                        let next_ptr = *parts.next_ptr;
-                        if next_ptr.is_null() {
-                            *front_leaf = None;
-                            *remaining = 0;
-                            return None;
-                        }
-
-                        *front_leaf = NonNull::new(next_ptr);
-                        *front_idx = 0;
-                        // Continue loop instead of recursive call
+            // Hop to the next leaf and refresh the cached view.
+            unsafe {
+                let parts = layout::carve_leaf::<K, V>(leaf, &self.tree.leaf_layout);
+                match NonNull::new(*parts.next_ptr) {
+                    None => {
+                        self.front_leaf = None;
+                        return None;
+                    }
+                    Some(next) => {
+                        let np = layout::carve_leaf::<K, V>(next, &self.tree.leaf_layout);
+                        self.front_leaf = Some(next);
+                        self.front_idx = 0;
+                        self.front_len = (*np.hdr).len as usize;
+                        self.front_keys = np.keys_ptr as *const K;
+                        self.front_vals = np.vals_ptr as *const V;
                     }
                 }
             }
-            ItemsInner::Vec { inner } => inner.next(),
         }
     }
 
     fn size_hint(&self) -> (usize, Option<usize>) {
-        match &self.inner {
-            ItemsInner::Lazy {
-                remaining,
-                initialized,
-                ..
-            } => {
-                if *initialized && *remaining > 0 {
-                    (*remaining, Some(*remaining))
-                } else {
-                    // Uninitialized or unknown size
-                    (0, None)
-                }
-            }
-            ItemsInner::Vec { inner } => inner.size_hint(),
+        if self.front_leaf.is_none() {
+            (0, Some(0))
+        } else {
+            (0, None)
         }
     }
 }
 
 impl<'a, K: Ord, V> DoubleEndedIterator for Items<'a, K, V> {
     fn next_back(&mut self) -> Option<<Self as Iterator>::Item> {
-        match &mut self.inner {
-            ItemsInner::Lazy {
-                tree,
-                back_leaf,
-                back_idx,
-                remaining,
-                start_bound,
-                ..
-            } => {
-                let leaf = (*back_leaf)?;
+        loop {
+            let fleaf = self.front_leaf?;
+            let same = fleaf == self.back_leaf;
+            let lower = if same { self.front_idx } else { 0 };
+
+            if self.back_idx > lower {
                 unsafe {
-                    let parts = layout::carve_leaf::<K, V>(leaf, &tree.leaf_layout);
-
-                    if *back_idx > 0 {
-                        *back_idx -= 1;
-                        let k = &*(parts.keys_ptr.add(*back_idx) as *const K);
-
-                        // Check start bound
-                        let within_bound = match start_bound {
-                            Bound::Unbounded => true,
-                            Bound::Included(s) => k >= s,
-                            Bound::Excluded(s) => k > s,
-                        };
-
-                        if !within_bound {
-                            *back_leaf = None;
-                            *remaining = 0;
-                            return None;
-                        }
-
-                        let v = &*(parts.vals_ptr.add(*back_idx) as *const V);
-                        if *remaining > 0 {
-                            *remaining -= 1;
-                        }
-                        return Some((k, v));
-                    }
-
-                    // Move to previous leaf
-                    let prev_ptr = match parts.prev_ptr {
-                        Some(p) => *p,
-                        None => core::ptr::null_mut(),
-                    };
-                    if prev_ptr.is_null() {
-                        *back_leaf = None;
-                        *remaining = 0;
-                        return None;
-                    }
-
-                    *back_leaf = NonNull::new(prev_ptr);
-                    let prev_parts =
-                        layout::carve_leaf::<K, V>(back_leaf.unwrap(), &tree.leaf_layout);
-                    *back_idx = (*prev_parts.hdr).len as usize;
-                    self.next_back()
+                    self.back_idx -= 1;
+                    let k = &*self.back_keys.add(self.back_idx);
+                    let v = &*self.back_vals.add(self.back_idx);
+                    return Some((k, v));
                 }
             }
-            ItemsInner::Vec { inner } => inner.next_back(),
+
+            if same {
+                self.front_leaf = None;
+                return None;
+            }
+
+            // Hop to the previous leaf and refresh the cached view.
+            unsafe {
+                let parts = layout::carve_leaf::<K, V>(self.back_leaf, &self.tree.leaf_layout);
+                let prev = parts.prev_ptr.and_then(|p| NonNull::new(*p));
+                match prev {
+                    None => {
+                        self.front_leaf = None;
+                        return None;
+                    }
+                    Some(prev) => {
+                        let pp = layout::carve_leaf::<K, V>(prev, &self.tree.leaf_layout);
+                        self.back_leaf = prev;
+                        self.back_idx = (*pp.hdr).len as usize;
+                        self.back_keys = pp.keys_ptr as *const K;
+                        self.back_vals = pp.vals_ptr as *const V;
+                    }
+                }
+            }
         }
     }
 }
@@ -271,48 +165,147 @@ impl<'a, K: Ord, V> DoubleEndedIterator for Values<'a, K, V> {
 }
 
 impl<K: Ord + Clone, V> BPlusTreeMap<K, V> {
-    pub fn items(&self) -> Items<'_, K, V> {
-        let len = self.len();
-        if len == 0 {
-            return Items {
-                inner: ItemsInner::Lazy {
-                    tree: self,
-                    front_leaf: None,
-                    front_idx: 0,
-                    back_leaf: None,
-                    back_idx: 0,
-                    remaining: 0,
-                    start_bound: Bound::Unbounded,
-                    end_bound: Bound::Unbounded,
-                    initialized: true,
-                },
-            };
-        }
-
-        let front_leaf = self.leftmost_leaf();
-        let back_leaf = self.rightmost_leaf();
-        let back_idx = if let Some(leaf) = back_leaf {
-            unsafe {
-                let parts = layout::carve_leaf::<K, V>(leaf, &self.leaf_layout);
-                (*parts.hdr).len as usize
-            }
-        } else {
-            0
-        };
-
+    fn empty_items(&self) -> Items<'_, K, V> {
         Items {
-            inner: ItemsInner::Lazy {
+            tree: self,
+            front_leaf: None,
+            front_idx: 0,
+            front_len: 0,
+            front_keys: core::ptr::null(),
+            front_vals: core::ptr::null(),
+            back_leaf: NonNull::dangling(),
+            back_idx: 0,
+            back_keys: core::ptr::null(),
+            back_vals: core::ptr::null(),
+        }
+    }
+
+    /// Resolve the start bound to the position of the first in-range item.
+    unsafe fn resolve_front(&self, start: Bound<&K>) -> Option<(NonNull<u8>, usize)> {
+        match start {
+            Bound::Unbounded => {
+                let leaf = self.leftmost_leaf()?;
+                let parts = layout::carve_leaf::<K, V>(leaf, &self.leaf_layout);
+                // Only a root leaf can be empty, and it has no siblings.
+                if (*parts.hdr).len == 0 {
+                    return None;
+                }
+                Some((leaf, 0))
+            }
+            Bound::Included(k) | Bound::Excluded(k) => {
+                let excluded = matches!(start, Bound::Excluded(_));
+                let leaf = self.leaf_for_key(k)?;
+                let parts = layout::carve_leaf::<K, V>(leaf, &self.leaf_layout);
+                let len = (*parts.hdr).len as usize;
+                let keys = core::slice::from_raw_parts(parts.keys_ptr as *const K, len);
+                let idx = match keys.binary_search(k) {
+                    Ok(i) => {
+                        if excluded {
+                            i + 1
+                        } else {
+                            i
+                        }
+                    }
+                    Err(i) => i,
+                };
+                if idx < len {
+                    Some((leaf, idx))
+                } else {
+                    // Non-root leaves are never empty.
+                    NonNull::new(*parts.next_ptr).map(|next| (next, 0))
+                }
+            }
+        }
+    }
+
+    /// Resolve the end bound to the position one past the last in-range item.
+    unsafe fn resolve_back(&self, end: Bound<&K>) -> Option<(NonNull<u8>, usize)> {
+        match end {
+            Bound::Unbounded => {
+                let leaf = self.rightmost_leaf()?;
+                let parts = layout::carve_leaf::<K, V>(leaf, &self.leaf_layout);
+                let len = (*parts.hdr).len as usize;
+                if len == 0 {
+                    return None;
+                }
+                Some((leaf, len))
+            }
+            Bound::Included(k) | Bound::Excluded(k) => {
+                let excluded = matches!(end, Bound::Excluded(_));
+                let leaf = self.leaf_for_key(k)?;
+                let parts = layout::carve_leaf::<K, V>(leaf, &self.leaf_layout);
+                let len = (*parts.hdr).len as usize;
+                let keys = core::slice::from_raw_parts(parts.keys_ptr as *const K, len);
+                let idx = match keys.binary_search(k) {
+                    Ok(i) => {
+                        if excluded {
+                            i
+                        } else {
+                            i + 1
+                        }
+                    }
+                    Err(i) => i,
+                };
+                if idx > 0 {
+                    Some((leaf, idx))
+                } else {
+                    // End position is the boundary before this leaf: the end of
+                    // the previous leaf (never empty, being non-root).
+                    let prev = parts.prev_ptr.and_then(|p| NonNull::new(*p))?;
+                    let pp = layout::carve_leaf::<K, V>(prev, &self.leaf_layout);
+                    Some((prev, (*pp.hdr).len as usize))
+                }
+            }
+        }
+    }
+
+    fn make_items(&self, start: Bound<&K>, end: Bound<&K>) -> Items<'_, K, V> {
+        unsafe {
+            let (front_leaf, front_idx) = match self.resolve_front(start) {
+                Some(pos) => pos,
+                None => return self.empty_items(),
+            };
+            let (back_leaf, back_idx) = match self.resolve_back(end) {
+                Some(pos) => pos,
+                None => return self.empty_items(),
+            };
+
+            let fp = layout::carve_leaf::<K, V>(front_leaf, &self.leaf_layout);
+            let front_keys = fp.keys_ptr as *const K;
+            let front_vals = fp.vals_ptr as *const V;
+
+            // The front cursor points at the first key satisfying the start
+            // bound; if that key violates the end bound the range is empty
+            // (this also covers inverted bounds). Otherwise the front
+            // position is strictly before the back position.
+            let first_key = &*front_keys.add(front_idx);
+            let in_range = match end {
+                Bound::Unbounded => true,
+                Bound::Included(e) => first_key <= e,
+                Bound::Excluded(e) => first_key < e,
+            };
+            if !in_range {
+                return self.empty_items();
+            }
+
+            let bp = layout::carve_leaf::<K, V>(back_leaf, &self.leaf_layout);
+            Items {
                 tree: self,
-                front_leaf,
-                front_idx: 0,
+                front_leaf: Some(front_leaf),
+                front_idx,
+                front_len: (*fp.hdr).len as usize,
+                front_keys,
+                front_vals,
                 back_leaf,
                 back_idx,
-                remaining: len,
-                start_bound: Bound::Unbounded,
-                end_bound: Bound::Unbounded,
-                initialized: true,
-            },
+                back_keys: bp.keys_ptr as *const K,
+                back_vals: bp.vals_ptr as *const V,
+            }
         }
+    }
+
+    pub fn items(&self) -> Items<'_, K, V> {
+        self.make_items(Bound::Unbounded, Bound::Unbounded)
     }
 
     pub fn keys(&self) -> Keys<'_, K, V> {
@@ -328,115 +321,42 @@ impl<K: Ord + Clone, V> BPlusTreeMap<K, V> {
     }
 
     pub fn items_range(&self, start: Option<&K>, end: Option<&K>) -> Items<'_, K, V> {
-        // TODO: Implement lazy range iteration
-        // For now, collect into Vec (old implementation)
         let sb = start.map_or(Bound::Unbounded, Bound::Included);
         let eb = end.map_or(Bound::Unbounded, Bound::Excluded);
-        Items {
-            inner: ItemsInner::Vec {
-                inner: self.collect_range_bounds(sb, eb).into_iter(),
-            },
-        }
+        self.make_items(sb, eb)
     }
 
     pub fn range<R: RangeBounds<K>>(&self, r: R) -> Items<'_, K, V> {
-        let start_bound = r.start_bound();
-        let end_bound = r.end_bound();
-
-        Items {
-            inner: ItemsInner::Lazy {
-                tree: self,
-                front_leaf: None,
-                front_idx: 0,
-                back_leaf: None,
-                back_idx: 0,
-                remaining: 0, // Unknown for ranges, size_hint will return (0, None)
-                start_bound: Self::clone_bound(start_bound),
-                end_bound: Self::clone_bound(end_bound),
-                initialized: false,
-            },
-        }
-    }
-
-    fn clone_bound(bound: Bound<&K>) -> Bound<K> {
-        match bound {
-            Bound::Unbounded => Bound::Unbounded,
-            Bound::Included(k) => Bound::Included(k.clone()),
-            Bound::Excluded(k) => Bound::Excluded(k.clone()),
-        }
+        self.make_items(r.start_bound(), r.end_bound())
     }
 
     pub fn first(&self) -> Option<(&K, &V)> {
-        self.items().next()
+        let leaf = self.leftmost_leaf()?;
+        unsafe {
+            let parts = layout::carve_leaf::<K, V>(leaf, &self.leaf_layout);
+            if (*parts.hdr).len == 0 {
+                return None;
+            }
+            Some((
+                &*(parts.keys_ptr as *const K),
+                &*(parts.vals_ptr as *const V),
+            ))
+        }
     }
 
     pub fn last(&self) -> Option<(&K, &V)> {
-        self.items().last()
-    }
-
-    pub(crate) fn collect_range_bounds<'a>(
-        &'a self,
-        start: Bound<&K>,
-        end: Bound<&K>,
-    ) -> Vec<(&'a K, &'a V)> {
-        let mut out = Vec::new();
-        let leaf_ptr = match start {
-            Bound::Unbounded => self.leftmost_leaf(),
-            Bound::Included(k) | Bound::Excluded(k) => self.leaf_for_key(k),
-        };
-        if leaf_ptr.is_none() {
-            return out;
-        }
+        let leaf = self.rightmost_leaf()?;
         unsafe {
-            let mut cur = leaf_ptr.unwrap().as_ptr();
-            let mut first_idx = 0usize;
-            if let Bound::Included(s) | Bound::Excluded(s) = start {
-                let parts =
-                    layout::carve_leaf::<K, V>(NonNull::new_unchecked(cur), &self.leaf_layout);
-                let len = (*parts.hdr).len as usize;
-                let keys = core::slice::from_raw_parts(parts.keys_ptr as *const K, len);
-                match self.binary_search_keys(keys, s) {
-                    Ok(i) => {
-                        first_idx = if matches!(start, Bound::Excluded(_)) {
-                            i + 1
-                        } else {
-                            i
-                        };
-                    }
-                    Err(i) => {
-                        first_idx = i;
-                    }
-                }
+            let parts = layout::carve_leaf::<K, V>(leaf, &self.leaf_layout);
+            let len = (*parts.hdr).len as usize;
+            // Only a root leaf can be empty; non-root leaves hold >= min_leaf_len.
+            if len == 0 {
+                return None;
             }
-            loop {
-                if cur.is_null() {
-                    break;
-                }
-                let hdr = &*(cur as *const NodeHdr);
-                if hdr.tag != NodeTag::Leaf {
-                    break;
-                }
-                let len = hdr.len as usize;
-                let keys_ptr = (cur.add(self.leaf_layout.keys_off)) as *const K;
-                let vals_ptr = (cur.add(self.leaf_layout.vals_off)) as *const V;
-                for i in first_idx..len {
-                    let kref = &*keys_ptr.add(i);
-                    let end_ok = match end {
-                        Bound::Unbounded => true,
-                        Bound::Included(e) => kref <= e,
-                        Bound::Excluded(e) => kref < e,
-                    };
-                    if !end_ok {
-                        return out;
-                    }
-                    let vref = &*vals_ptr.add(i);
-                    out.push((kref, vref));
-                }
-                first_idx = 0;
-                let next_ptr = (cur.add(self.leaf_layout.next_off)) as *const *mut u8;
-                cur = *next_ptr;
-            }
+            Some((
+                &*(parts.keys_ptr.add(len - 1) as *const K),
+                &*(parts.vals_ptr.add(len - 1) as *const V),
+            ))
         }
-        out
     }
 }

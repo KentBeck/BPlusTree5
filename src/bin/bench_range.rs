@@ -4,7 +4,7 @@ use std::hint::black_box;
 use std::time::Instant;
 
 fn bench_bplus_range(n: usize, range_size: usize, iterations: usize) -> f64 {
-    let mut map = BPlusTreeMap::with_cache_lines(2, 2);
+    let mut map = BPlusTreeMap::new(128).expect("capacity");
     for i in 0..n {
         map.insert(i, i * 2);
     }
