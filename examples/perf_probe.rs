@@ -17,7 +17,7 @@ fn main() {
     let keys = pseudo_shuffle(n);
 
     println!("== insert {} random u64 keys ==", n);
-    for cap in [8usize, 16, 32, 64, 128, 256] {
+    for cap in [64usize, 128, 256, 512] {
         let t0 = Instant::now();
         let mut m = BPlusTreeMap::new(cap).unwrap();
         for &k in &keys {
@@ -36,7 +36,7 @@ fn main() {
     println!("  std::BTreeMap    {:.3}s ({:.2} Mops)", dt, n as f64 / dt / 1e6);
 
     println!("== sequential insert (sorted keys) ==");
-    for cap in [16usize, 128] {
+    for cap in [128usize, 256] {
         let t0 = Instant::now();
         let mut m = BPlusTreeMap::new(cap).unwrap();
         for i in 0..n as u64 {

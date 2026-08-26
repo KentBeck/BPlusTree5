@@ -15,7 +15,7 @@ unsafe fn rdtsc() -> u64 {
 #[cfg(target_arch = "x86_64")]
 fn main() {
     let n = 1_000_000;
-    let mut map = BPlusTreeMap::with_cache_lines(2, 2);
+    let mut map = BPlusTreeMap::new(128).expect("capacity");
 
     println!("Building tree with {} elements...", n);
     for i in 0..n {

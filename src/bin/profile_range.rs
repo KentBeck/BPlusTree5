@@ -3,7 +3,7 @@ use std::hint::black_box;
 
 fn main() {
     let n = 1_000_000;
-    let mut map = BPlusTreeMap::with_cache_lines(2, 2);
+    let mut map = BPlusTreeMap::new(128).expect("capacity");
 
     // Insert sequential keys
     for i in 0..n {

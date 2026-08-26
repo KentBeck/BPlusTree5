@@ -15,9 +15,9 @@ fn parse_arg<T: std::str::FromStr>(i: usize, default: T) -> T {
 }
 
 fn main() {
-    // Usage: bench_insert [n=1000000] [cap=16]
+    // Usage: bench_insert [n=1000000] [cap=128]
     let n: usize = parse_arg(1, 1_000_000);
-    let cap: usize = parse_arg(2, 16);
+    let cap: usize = parse_arg(2, 128);
 
     let dataset = generate_dataset(n);
     let lookup_keys: Vec<u64> = dataset.iter().map(|(k, _)| *k).collect();
