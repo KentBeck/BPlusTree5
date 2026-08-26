@@ -52,9 +52,7 @@ Losses:
 |----------------------------------------|----------------------------------|
 | `len()` (1M items)                     | O(n) vs O(1) (~0.4 ms per call)  |
 | random insert                          | 1.16× slower (bench_insert keys) to 1.6× slower (hash-scattered probe keys) |
-| range scan, 100–10k items              | 1.6–2.1× slower                  |
-| tiny cursor iterations (10 items)      | 1.16× slower                     |
-| backward iteration, small tree (10k)   | 1.7× slower                      |
+| single-item range seek / tiny cursors  | 1.1–1.2× slower (descent-bound) |
 
 Capacity sweep (random insert, probe keys): 64 → 0.372s, 128 → 0.412s,
 256 → 0.443s, 512 → 0.608s (std: 0.254s). Insert degrades with leaf size
@@ -91,18 +89,25 @@ first/last pairs went from 39s to 0.1ms — parity with std.
 
 ## P1 — the real per-op gaps
 
-### 3. Range/cursor iterator: cache leaf state, precompute the end
+### 3. ~~Range/cursor iterator: cache leaf state, precompute the end~~ — DONE
 
-`Items::next` (`iterate.rs:100-142`) re-carves the leaf and re-reads
-`hdr.len` on every element, and for bounded ranges compares the key against
-`end_bound` on every element; `range()` also clones both bound keys up front.
-Restructure `ItemsInner::Lazy` to hold `cur_keys: *const K, cur_vals: *const
-V, cur_idx, cur_end` refreshed only on leaf hop, and resolve the end bound
-once at initialization to a concrete `(end_leaf, end_idx)` position so the
-per-item check becomes an index/pointer compare. This targets the largest
-steady-state loss: 1.6–2.1× on 100–10k-item range scans and 1.16× on tiny
-cursor iterations. Full-scan iteration already wins, so verify no regression
-there (its per-item cost is the same loop).
+The iterator now resolves both bounds to concrete (leaf, index) positions at
+construction and caches the current leaf's key/value pointers, so per-item
+work is an index compare and two pointer reads — no key comparisons, no
+re-carving, no bound-key clones. `items()` no longer calls the O(n) `len()`
+(the item-1 decoupling), `items_range()` is lazy instead of collecting a Vec
+(old item 8), and `next_back` got the same treatment (old item 7).
+
+The rewrite also fixed two latent double-ended-iteration bugs, now covered
+by the fuzzer: `range(..).rev()` yielded nothing (the back cursor was never
+initialized for ranges), and interleaved `next()`/`next_back()` could yield
+elements twice (the cursors never checked for meeting).
+
+Measured after: bench_range flipped from 0.5–0.8× (losing) to 1.17–2.17×
+faster at every range size; full iteration is 2.7–10× faster than std at
+every size, forward and backward (backward at 10k was 1.7× slower, now 2.7×
+faster). Still behind: single-item seeks and 10-item cursor hops (1.1–1.2×),
+which are now pure descent cost — item 4c is the lever.
 
 ### 4. Random insert path
 
@@ -151,16 +156,8 @@ bounded (e.g. 64 pooled nodes per kind) so memory doesn't grow monotonically.
 
 ## P2 — smaller cleanups
 
-### 7. Iterative, cached `next_back`
-
-`next_back` (`iterate.rs:221`) recurses on leaf transitions and re-carves per
-element. Apply the same loop + cached-leaf treatment as item 3. Fixes the
-1.7× backward-iteration gap on small trees (large trees already win).
-
-### 8. Make `items_range()` lazy
-
-`iterate.rs:330-340` still collects into a `Vec` (marked TODO). Route it
-through the same lazy machinery as `range()`.
+(Items 7 and 8 — cached iterative `next_back`, lazy `items_range()` — were
+absorbed into item 3's rewrite.)
 
 ### 9. Keep benchmarks honest about capacity
 
@@ -171,11 +168,10 @@ worse than the tree actually is). Any future benchmark must use cap ≥ 64.
 
 ## Sequencing
 
-1. Item 1's decoupling first (item 2 is done): de-noises any benchmark that
-   constructs full iterators, which currently pay the O(n) `len()` walk.
-2. Item 3 against the range/cursor probes in `perf_probe`.
-3. Items 4a–4c as separate commits against the random-insert sweep.
-4. Items 5–6 next if insert is still behind; 7–8 as cleanups.
+1. ~~Items 1 (decoupling), 2, 3, 7, 8~~ — done.
+2. Items 4a–4c as separate commits against the random-insert sweep; 4c also
+   serves the remaining tiny-seek/cursor gap.
+3. Items 5–6 next if insert is still behind.
 
 Stop when random insert and mid-size range scans are within ~1.1× of std or
 ahead; the structure (contiguous fixed-size nodes, linked leaves) should keep

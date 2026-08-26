@@ -142,11 +142,64 @@ fn run_differential(seed: u64, capacity: usize, ops: usize, key_space: u64) {
                     _ => true,
                 };
                 if valid {
-                    let got: Vec<(i64, i64)> =
-                        tree.range((a, b)).map(|(k, v)| (*k, v.get())).collect();
-                    let exp: Vec<(i64, i64)> =
-                        model.range((a, b)).map(|(k, v)| (*k, *v)).collect();
-                    assert_eq!(got, exp, "range {:?}..{:?} mismatch: {}", a, b, ctx(op));
+                    match rng.below(3) {
+                        0 => {
+                            let got: Vec<(i64, i64)> =
+                                tree.range((a, b)).map(|(k, v)| (*k, v.get())).collect();
+                            let exp: Vec<(i64, i64)> =
+                                model.range((a, b)).map(|(k, v)| (*k, *v)).collect();
+                            assert_eq!(got, exp, "range {:?}..{:?} mismatch: {}", a, b, ctx(op));
+                        }
+                        1 => {
+                            let got: Vec<(i64, i64)> = tree
+                                .range((a, b))
+                                .rev()
+                                .map(|(k, v)| (*k, v.get()))
+                                .collect();
+                            let exp: Vec<(i64, i64)> =
+                                model.range((a, b)).rev().map(|(k, v)| (*k, *v)).collect();
+                            assert_eq!(
+                                got, exp,
+                                "reverse range {:?}..{:?} mismatch: {}",
+                                a, b, ctx(op)
+                            );
+                        }
+                        _ => {
+                            // Interleaved double-ended consumption must yield each
+                            // element exactly once, meeting in the middle.
+                            let mut ti = tree.range((a, b));
+                            let mut mi = model.range((a, b));
+                            loop {
+                                let front = rng.below(2) == 0;
+                                let (g, e) = if front {
+                                    (
+                                        ti.next().map(|(k, v)| (*k, v.get())),
+                                        mi.next().map(|(k, v)| (*k, *v)),
+                                    )
+                                } else {
+                                    (
+                                        ti.next_back().map(|(k, v)| (*k, v.get())),
+                                        mi.next_back().map(|(k, v)| (*k, *v)),
+                                    )
+                                };
+                                assert_eq!(
+                                    g, e,
+                                    "interleaved range {:?}..{:?} (front={}) mismatch: {}",
+                                    a, b, front, ctx(op)
+                                );
+                                if g.is_none() {
+                                    break;
+                                }
+                            }
+                            // Exhausted from one end means exhausted from both.
+                            assert!(ti.next().is_none(), "next after exhaustion: {}", ctx(op));
+                            assert!(
+                                ti.next_back().is_none(),
+                                "next_back after exhaustion: {}",
+                                ctx(op)
+                            );
+                        }
+                    }
                 }
             }
             // first/last + full iteration (4%)
