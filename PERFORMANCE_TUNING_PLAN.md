@@ -33,6 +33,12 @@ Every tuning change must pass, in order, before it lands:
 
 One change per commit, with before/after numbers in the commit message.
 
+**Measurement note:** this environment has a ±10–15% run-to-run noise floor
+(std's own numbers swing that much between runs). Never compare numbers from
+separate runs. To claim a win, build the before and after binaries side by
+side (`git worktree add` the parent commit) and interleave several rounds of
+both; the effect must clear the interleaved spread.
+
 ## Where we stand today (cap=128, 1M items)
 
 Wins (keep these; do not regress):
@@ -116,15 +122,18 @@ which are now pure descent cost — item 4c is the lever.
 (`insert.rs:63`), branch descent (`insert.rs:65-66`), and split work. In
 order of expected value:
 
-a. ~~**Stop zeroing vacated slots on split paths.**~~ — DONE. All
-   `write_bytes` zeroing of vacated key/value/child slots on the insert
-   split paths, the delete borrow/merge paths, and `move_kv_at` is removed;
-   occupancy is defined solely by `hdr.len` (the null child-pointer
-   sentinels in delete.rs stay — `check_root_collapse` reads them). Proved
-   safe by the full gate including Miri over the fuzz, drop/clear, and
-   borrowing suites. Measured: random insert went from 1.16× behind to
-   parity on bench_insert keys, and from 1.62× to ~1.4× behind on the
-   probe's hash-scattered keys; delete and sequential insert still win.
+a. ~~**Stop zeroing vacated slots on split paths.**~~ — DONE, but
+   **perf-neutral**. All `write_bytes` zeroing of vacated key/value/child
+   slots on the insert split paths, the delete borrow/merge paths, and
+   `move_kv_at` is removed; occupancy is defined solely by `hdr.len` (the
+   null child-pointer sentinels in delete.rs stay — `check_root_collapse`
+   reads them). Proved safe by the full gate including Miri over the fuzz,
+   drop/clear, and borrowing suites. An interleaved A/B of the before/after
+   binaries showed no gain beyond noise (the commit message's claimed
+   improvement was cross-run variance — see the measurement note below).
+   Kept anyway: fewer stores, and the code no longer implies occupancy
+   depends on zeroed slots. Splits are simply too rare (~1 per cap/2
+   inserts) for their memsets to matter.
 
 b. **Iterative descent with cached carve.** `insert_rec` (`insert.rs:60`)
    recurses and re-carves the branch on the way back up for split fixups.
