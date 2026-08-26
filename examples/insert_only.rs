@@ -9,7 +9,9 @@ use std::hint::black_box;
 fn main() {
     let args: Vec<String> = std::env::args().skip(1).collect();
     let leaf_cap: usize = args.first().map_or(128, |a| a.parse().expect("leaf_cap"));
-    let branch_cap: usize = args.get(1).map_or(leaf_cap, |a| a.parse().expect("branch_cap"));
+    let branch_cap: usize = args
+        .get(1)
+        .map_or(leaf_cap, |a| a.parse().expect("branch_cap"));
     let n: usize = args.get(2).map_or(200_000, |a| a.parse().expect("n"));
     assert!(n > 0, "n must be greater than zero");
     let phase = args.get(3).map_or("build", |a| a.as_str());

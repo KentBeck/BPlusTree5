@@ -24,7 +24,12 @@ fn main() {
             m.insert(k, k);
         }
         let dt = t0.elapsed().as_secs_f64();
-        println!("  bplustree cap={:<4} {:.3}s ({:.2} Mops)", cap, dt, n as f64 / dt / 1e6);
+        println!(
+            "  bplustree cap={:<4} {:.3}s ({:.2} Mops)",
+            cap,
+            dt,
+            n as f64 / dt / 1e6
+        );
         black_box(&m);
     }
     {
@@ -34,7 +39,11 @@ fn main() {
             m.insert(k, k);
         }
         let dt = t0.elapsed().as_secs_f64();
-        println!("  bplustree 32/256 {:.3}s ({:.2} Mops)", dt, n as f64 / dt / 1e6);
+        println!(
+            "  bplustree 32/256 {:.3}s ({:.2} Mops)",
+            dt,
+            n as f64 / dt / 1e6
+        );
         black_box(&m);
     }
     let t0 = Instant::now();
@@ -43,7 +52,11 @@ fn main() {
         sm.insert(k, k);
     }
     let dt = t0.elapsed().as_secs_f64();
-    println!("  std::BTreeMap    {:.3}s ({:.2} Mops)", dt, n as f64 / dt / 1e6);
+    println!(
+        "  std::BTreeMap    {:.3}s ({:.2} Mops)",
+        dt,
+        n as f64 / dt / 1e6
+    );
 
     println!("== sequential insert (sorted keys) ==");
     for cap in [128usize, 256] {
@@ -53,7 +66,12 @@ fn main() {
             m.insert(i, i);
         }
         let dt = t0.elapsed().as_secs_f64();
-        println!("  bplustree cap={:<4} {:.3}s ({:.2} Mops)", cap, dt, n as f64 / dt / 1e6);
+        println!(
+            "  bplustree cap={:<4} {:.3}s ({:.2} Mops)",
+            cap,
+            dt,
+            n as f64 / dt / 1e6
+        );
         black_box(&m);
     }
     let t0 = Instant::now();
@@ -62,7 +80,11 @@ fn main() {
         sm2.insert(i, i);
     }
     let dt = t0.elapsed().as_secs_f64();
-    println!("  std::BTreeMap    {:.3}s ({:.2} Mops)", dt, n as f64 / dt / 1e6);
+    println!(
+        "  std::BTreeMap    {:.3}s ({:.2} Mops)",
+        dt,
+        n as f64 / dt / 1e6
+    );
 
     // Build cap=128 tree of sorted keys for query probes.
     let mut m = BPlusTreeMap::new(128).unwrap();

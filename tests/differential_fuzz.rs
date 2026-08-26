@@ -26,7 +26,11 @@ struct Tracked {
 impl Tracked {
     fn new(val: i64, live: &Arc<AtomicUsize>) -> Self {
         live.fetch_add(1, Ordering::SeqCst);
-        Tracked { canary: CANARY, val, live: Arc::clone(live) }
+        Tracked {
+            canary: CANARY,
+            val,
+            live: Arc::clone(live),
+        }
     }
     fn get(&self) -> i64 {
         assert_eq!(self.canary, CANARY, "canary destroyed: use-after-free?");
@@ -72,7 +76,13 @@ fn run_differential(seed: u64, capacity: usize, ops: usize, key_space: u64) {
     run_differential_caps(seed, capacity, capacity, ops, key_space)
 }
 
-fn run_differential_caps(seed: u64, leaf_cap: usize, branch_cap: usize, ops: usize, key_space: u64) {
+fn run_differential_caps(
+    seed: u64,
+    leaf_cap: usize,
+    branch_cap: usize,
+    ops: usize,
+    key_space: u64,
+) {
     // Miri runs orders of magnitude slower; a few hundred ops per config is
     // still enough to cross split/merge/borrow paths at small capacities.
     let ops = if cfg!(miri) { ops.min(300) } else { ops };
@@ -81,8 +91,12 @@ fn run_differential_caps(seed: u64, leaf_cap: usize, branch_cap: usize, ops: usi
     let mut tree: BPlusTreeMap<i64, Tracked> =
         BPlusTreeMap::with_caps(leaf_cap, branch_cap).unwrap();
     let mut model: BTreeMap<i64, i64> = BTreeMap::new();
-    let ctx =
-        |op: usize| format!("seed={:#x} caps={}/{} op#{}", seed, leaf_cap, branch_cap, op);
+    let ctx = |op: usize| {
+        format!(
+            "seed={:#x} caps={}/{} op#{}",
+            seed, leaf_cap, branch_cap, op
+        )
+    };
 
     for op in 0..ops {
         match rng.below(100) {
@@ -170,9 +184,12 @@ fn run_differential_caps(seed: u64, leaf_cap: usize, branch_cap: usize, ops: usi
                             let exp: Vec<(i64, i64)> =
                                 model.range((a, b)).rev().map(|(k, v)| (*k, *v)).collect();
                             assert_eq!(
-                                got, exp,
+                                got,
+                                exp,
                                 "reverse range {:?}..{:?} mismatch: {}",
-                                a, b, ctx(op)
+                                a,
+                                b,
+                                ctx(op)
                             );
                         }
                         _ => {
@@ -194,9 +211,13 @@ fn run_differential_caps(seed: u64, leaf_cap: usize, branch_cap: usize, ops: usi
                                     )
                                 };
                                 assert_eq!(
-                                    g, e,
+                                    g,
+                                    e,
                                     "interleaved range {:?}..{:?} (front={}) mismatch: {}",
-                                    a, b, front, ctx(op)
+                                    a,
+                                    b,
+                                    front,
+                                    ctx(op)
                                 );
                                 if g.is_none() {
                                     break;
