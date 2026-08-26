@@ -51,7 +51,7 @@ Losses:
 | Operation                              | vs std::BTreeMap                 |
 |----------------------------------------|----------------------------------|
 | `len()` (1M items)                     | O(n) vs O(1) (~0.4 ms per call)  |
-| random insert                          | 1.16× slower (bench_insert keys) to 1.6× slower (hash-scattered probe keys) |
+| random insert                          | parity (bench_insert keys) to 1.4× slower (hash-scattered probe keys) |
 | single-item range seek / tiny cursors  | 1.1–1.2× slower (descent-bound) |
 
 Capacity sweep (random insert, probe keys): 64 → 0.372s, 128 → 0.412s,
@@ -116,12 +116,15 @@ which are now pure descent cost — item 4c is the lever.
 (`insert.rs:63`), branch descent (`insert.rs:65-66`), and split work. In
 order of expected value:
 
-a. **Stop zeroing vacated slots on split paths.** `insert.rs` (lines 133,
-   140, 183, 192, 214, 222–241) and `move_kv_at` (`common.rs:94-95`)
-   `write_bytes`-zero every slot they move out of. Node occupancy is defined
-   solely by `hdr.len` — drop/iteration/search never read past it — so the
-   memsets are pure overhead on every split and borrow. Remove them; the Miri
-   gate exists precisely to prove nothing relied on the zeroing.
+a. ~~**Stop zeroing vacated slots on split paths.**~~ — DONE. All
+   `write_bytes` zeroing of vacated key/value/child slots on the insert
+   split paths, the delete borrow/merge paths, and `move_kv_at` is removed;
+   occupancy is defined solely by `hdr.len` (the null child-pointer
+   sentinels in delete.rs stay — `check_root_collapse` reads them). Proved
+   safe by the full gate including Miri over the fuzz, drop/clear, and
+   borrowing suites. Measured: random insert went from 1.16× behind to
+   parity on bench_insert keys, and from 1.62× to ~1.4× behind on the
+   probe's hash-scattered keys; delete and sequential insert still win.
 
 b. **Iterative descent with cached carve.** `insert_rec` (`insert.rs:60`)
    recurses and re-carves the branch on the way back up for split fixups.

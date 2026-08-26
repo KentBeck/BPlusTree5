@@ -130,14 +130,12 @@ impl<K: Ord + Clone, V> BPlusTreeMap<K, V> {
                     rb.keys_ptr as *mut K,
                     keys_move,
                 );
-                core::ptr::write_bytes((b.keys_ptr as *mut K).add(pm), 0, keys_move);
             }
             (*rb.hdr).len = keys_move as u16;
 
             // Move children [pm .. len] to right; clear source
             let cnt = (len + 1) - pm;
             core::ptr::copy_nonoverlapping(cbase_src.add(pm), cbase_dst, cnt);
-            core::ptr::write_bytes((b.children_ptr as *mut *mut u8).add(pm), 0, cnt);
 
             // Insert ins_key into left at insert_idx; shift keys and children
             let left_keep = pm - 1;
@@ -180,7 +178,6 @@ impl<K: Ord + Clone, V> BPlusTreeMap<K, V> {
                     rb.keys_ptr as *mut K,
                     keys_move,
                 );
-                core::ptr::write_bytes((b.keys_ptr as *mut K).add(pm), 0, keys_move);
             }
             (*rb.hdr).len = keys_move as u16;
 
@@ -189,7 +186,6 @@ impl<K: Ord + Clone, V> BPlusTreeMap<K, V> {
             let cnt = len - pm;
             if cnt > 0 {
                 core::ptr::copy_nonoverlapping(cbase_src.add(pm + 1), cbase_dst.add(1), cnt);
-                core::ptr::write_bytes((b.children_ptr as *mut *mut u8).add(pm + 1), 0, cnt);
             }
 
             (*b.hdr).len = pm as u16;
@@ -211,7 +207,6 @@ impl<K: Ord + Clone, V> BPlusTreeMap<K, V> {
                     rb.keys_ptr as *mut K,
                     keys_move,
                 );
-                core::ptr::write_bytes((b.keys_ptr as *mut K).add(pm + 1), 0, keys_move);
             }
             (*rb.hdr).len = keys_move as u16;
 
@@ -219,11 +214,6 @@ impl<K: Ord + Clone, V> BPlusTreeMap<K, V> {
             let first_count = insert_idx - pm;
             if first_count > 0 {
                 core::ptr::copy_nonoverlapping(cbase_src.add(pm + 1), cbase_dst, first_count);
-                core::ptr::write_bytes(
-                    (b.children_ptr as *mut *mut u8).add(pm + 1),
-                    0,
-                    first_count,
-                );
             }
             *cbase_dst.add(first_count) = ins_right.as_ptr();
             let second_count = len - insert_idx;
@@ -231,11 +221,6 @@ impl<K: Ord + Clone, V> BPlusTreeMap<K, V> {
                 core::ptr::copy_nonoverlapping(
                     cbase_src.add(insert_idx + 1),
                     cbase_dst.add(first_count + 1),
-                    second_count,
-                );
-                core::ptr::write_bytes(
-                    (b.children_ptr as *mut *mut u8).add(insert_idx + 1),
-                    0,
                     second_count,
                 );
             }
@@ -356,17 +341,6 @@ impl<K: Ord + Clone, V> BPlusTreeMap<K, V> {
                         core::ptr::copy_nonoverlapping(
                             (parts.vals_ptr as *const V).add(left_keep),
                             r.vals_ptr as *mut V,
-                            move_count,
-                        );
-                        // Clear moved slots in the left leaf to avoid accidental drops/use
-                        core::ptr::write_bytes(
-                            (parts.keys_ptr as *mut K).add(left_keep),
-                            0,
-                            move_count,
-                        );
-                        core::ptr::write_bytes(
-                            (parts.vals_ptr as *mut V).add(left_keep),
-                            0,
                             move_count,
                         );
                         right_len = move_count;

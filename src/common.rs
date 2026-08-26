@@ -75,7 +75,9 @@ impl<K, V> BPlusTreeMap<K, V> {
         keys.binary_search(target)
     }
 
-    /// Safely move a key-value pair from one location to another, ensuring sources are cleared.
+    /// Move a key-value pair from one location to another. The source slot is
+    /// left logically vacated: node occupancy is defined solely by hdr.len,
+    /// so callers must exclude the slot from the live range or overwrite it.
     #[inline(always)]
     pub(crate) unsafe fn move_kv_at(
         &self,
@@ -90,9 +92,6 @@ impl<K, V> BPlusTreeMap<K, V> {
         let val = core::ptr::read(src_vals_ptr.add(src_idx));
         core::ptr::write(dst_keys_ptr.add(dst_idx), key);
         core::ptr::write(dst_vals_ptr.add(dst_idx), val);
-        // Clear the source slots by writing zeros to prevent double-free
-        core::ptr::write_bytes(src_keys_ptr.add(src_idx), 0, 1);
-        core::ptr::write_bytes(src_vals_ptr.add(src_idx), 0, 1);
     }
 
     /// Shift key-value pairs left by one position (used after deletion).
