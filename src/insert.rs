@@ -413,21 +413,7 @@ impl<K: Ord + Clone, V> BPlusTreeMap<K, V> {
                         (*r.hdr).len = (right_len + 1) as u16; // equals right_count
                     }
 
-                    // Link leaf siblings
-                    let left_next = parts.next_ptr;
-                    let old_next = *left_next;
-                    *left_next = right.as_ptr();
-                    if let Some(prev_ptr) = r.prev_ptr {
-                        *prev_ptr = leaf.as_ptr();
-                    }
-                    let rnext = r.next_ptr;
-                    *rnext = old_next;
-                    if !old_next.is_null() {
-                        if let Some(prev_off) = self.leaf_layout.prev_off {
-                            let on_prev = (old_next.add(prev_off)) as *mut *mut u8;
-                            *on_prev = right.as_ptr();
-                        }
-                    }
+                    self.link_leaf_after(leaf, right);
 
                     let sep = self.key_clone_at(r.keys_ptr as *const K, 0);
                     InsertResult::Split {

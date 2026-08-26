@@ -1,4 +1,6 @@
-use crate::{dealloc_raw, layout, BPlusTreeError, BPlusTreeMap, NodeHdr, NodeTag};
+use crate::{
+    free_branch_block, free_leaf_block, layout, BPlusTreeError, BPlusTreeMap, NodeHdr, NodeTag,
+};
 use core::ptr::{self, NonNull};
 
 impl<K: Ord + Clone, V> BPlusTreeMap<K, V> {
@@ -109,33 +111,8 @@ impl<K: Ord + Clone, V> BPlusTreeMap<K, V> {
             0,
             "free_emptied_leaf called on a leaf that still holds items"
         );
-        let next = *parts.next_ptr;
-        let prev = match parts.prev_ptr {
-            Some(prev_ptr) => *prev_ptr,
-            None => ptr::null_mut(),
-        };
-
-        // Unlink from sibling chain
-        if !prev.is_null() {
-            let prev_leaf = NonNull::new_unchecked(prev);
-            let prev_parts = layout::carve_leaf::<K, V>(prev_leaf, &self.leaf_layout);
-            *prev_parts.next_ptr = next;
-        }
-
-        if !next.is_null() {
-            let next_leaf = NonNull::new_unchecked(next);
-            let next_parts = layout::carve_leaf::<K, V>(next_leaf, &self.leaf_layout);
-            if let Some(prev_ptr) = next_parts.prev_ptr {
-                *prev_ptr = prev;
-            }
-        }
-
-        *parts.next_ptr = ptr::null_mut();
-        if let Some(prev_ptr) = parts.prev_ptr {
-            *prev_ptr = ptr::null_mut();
-        }
-
-        dealloc_raw(leaf, self.leaf_layout.bytes, self.leaf_layout.max_align);
+        self.unlink_leaf(leaf);
+        free_leaf_block(leaf, &self.leaf_layout);
     }
 
     unsafe fn merge_leaf_into(&self, target: NonNull<u8>, source: NonNull<u8>) {
@@ -490,7 +467,7 @@ impl<K: Ord + Clone, V> BPlusTreeMap<K, V> {
             0,
             "free_emptied_branch called on a branch that still holds separators"
         );
-        dealloc_raw(node, self.branch_layout.bytes, self.branch_layout.max_align);
+        free_branch_block(node, &self.branch_layout);
     }
 
     /// Drop the separators a branch still owns and mark it empty, so it meets

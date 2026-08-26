@@ -94,6 +94,56 @@ impl<K, V> BPlusTreeMap<K, V> {
         core::ptr::write(dst_vals_ptr.add(dst_idx), val);
     }
 
+    /// Splice `new_right` into the leaf chain immediately after `leaf`.
+    /// Inverse of `unlink_leaf`; the two are the only places that edit the
+    /// sibling chain, so the doubly-linked invariant is auditable here.
+    #[inline]
+    pub(crate) unsafe fn link_leaf_after(&self, leaf: NonNull<u8>, new_right: NonNull<u8>) {
+        let l = layout::carve_leaf::<K, V>(leaf, &self.leaf_layout);
+        let r = layout::carve_leaf::<K, V>(new_right, &self.leaf_layout);
+        let old_next = *l.next_ptr;
+
+        *l.next_ptr = new_right.as_ptr();
+        *r.next_ptr = old_next;
+        if let Some(prev_ptr) = r.prev_ptr {
+            *prev_ptr = leaf.as_ptr();
+        }
+        if let Some(old) = NonNull::new(old_next) {
+            let o = layout::carve_leaf::<K, V>(old, &self.leaf_layout);
+            if let Some(prev_ptr) = o.prev_ptr {
+                *prev_ptr = new_right.as_ptr();
+            }
+        }
+    }
+
+    /// Splice `leaf` out of the leaf chain and clear its own links.
+    /// Inverse of `link_leaf_after`.
+    #[inline]
+    pub(crate) unsafe fn unlink_leaf(&self, leaf: NonNull<u8>) {
+        let parts = layout::carve_leaf::<K, V>(leaf, &self.leaf_layout);
+        let next = *parts.next_ptr;
+        let prev = match parts.prev_ptr {
+            Some(prev_ptr) => *prev_ptr,
+            None => core::ptr::null_mut(),
+        };
+
+        if let Some(prev_leaf) = NonNull::new(prev) {
+            let p = layout::carve_leaf::<K, V>(prev_leaf, &self.leaf_layout);
+            *p.next_ptr = next;
+        }
+        if let Some(next_leaf) = NonNull::new(next) {
+            let n = layout::carve_leaf::<K, V>(next_leaf, &self.leaf_layout);
+            if let Some(prev_ptr) = n.prev_ptr {
+                *prev_ptr = prev;
+            }
+        }
+
+        *parts.next_ptr = core::ptr::null_mut();
+        if let Some(prev_ptr) = parts.prev_ptr {
+            *prev_ptr = core::ptr::null_mut();
+        }
+    }
+
     /// Shift key-value pairs left by one position (used after deletion).
     /// This batches the key and value copy operations together.
     #[inline(always)]

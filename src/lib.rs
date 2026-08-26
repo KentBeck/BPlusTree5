@@ -16,8 +16,8 @@ mod node_alloc;
 pub use iterate::{Items, Keys, Values};
 pub use layout::{align_up, BranchLayout, LeafLayout, NodeHdr, NodeTag};
 pub use node_alloc::{
-    alloc_branch_block, alloc_leaf_block, alloc_raw, dealloc_raw, init_branch_block,
-    init_leaf_block,
+    alloc_branch_block, alloc_leaf_block, alloc_raw, dealloc_raw, free_branch_block,
+    free_leaf_block, init_branch_block, init_leaf_block,
 };
 
 /// Raw-memory B+ tree map with fixed-size leaf and branch nodes.
@@ -97,7 +97,7 @@ impl<K, V> BPlusTreeMap<K, V> {
                     ptr::drop_in_place((parts.vals_ptr as *mut V).add(i));
                 }
 
-                dealloc_raw(node, self.leaf_layout.bytes, self.leaf_layout.max_align);
+                free_leaf_block(node, &self.leaf_layout);
             }
             NodeTag::Branch => {
                 let parts = layout::carve_branch::<K>(node, &self.branch_layout);
@@ -116,7 +116,7 @@ impl<K, V> BPlusTreeMap<K, V> {
                     ptr::drop_in_place((parts.keys_ptr as *mut K).add(i));
                 }
 
-                dealloc_raw(node, self.branch_layout.bytes, self.branch_layout.max_align);
+                free_branch_block(node, &self.branch_layout);
             }
         }
     }
@@ -126,9 +126,8 @@ impl<K, V> BPlusTreeMap<K, V> {
 // Public API surface (compat scaffolding)
 // =============================
 // This section exists so the test suite imported from BPlusTree3 compiles
-// against this implementation. Everything here is either a real operation
-// (get_item, remove_item, batch_insert, ...) or, where marked, a vestige of
-// that arena-based design that this raw-memory tree no longer has.
+// against this implementation: error types, Result aliases, and convenience
+// wrappers (get_item, remove_item, batch_insert, ...) over the real API.
 
 use alloc::format;
 use alloc::string::String;
@@ -162,26 +161,6 @@ impl fmt::Display for BPlusTreeError {
 }
 
 impl core::error::Error for BPlusTreeError {}
-
-/// Vestigial: BPlusTree3 addressed nodes by arena id, and its test suite still
-/// constructs these. This tree addresses nodes by raw pointer, so nothing in
-/// the implementation produces or consumes a `NodeRef`.
-#[derive(Copy, Clone, Debug, PartialEq, Eq)]
-pub enum NodeRef<K, V> {
-    Leaf(u32, PhantomData<(K, V)>),
-    Branch(u32, PhantomData<(K, V)>),
-}
-
-impl<K, V> NodeRef<K, V> {
-    pub fn id(&self) -> u32 {
-        match *self {
-            NodeRef::Leaf(id, _) | NodeRef::Branch(id, _) => id,
-        }
-    }
-    pub fn is_leaf(&self) -> bool {
-        matches!(self, NodeRef::Leaf(_, _))
-    }
-}
 
 impl<K: Ord + Clone, V> BPlusTreeMap<K, V> {
     // ===== Compatibility constructors =====

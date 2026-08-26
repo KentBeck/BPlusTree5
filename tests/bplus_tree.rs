@@ -1,23 +1,7 @@
-use bplustree::{BPlusTreeError, BPlusTreeMap, NodeRef};
-use std::marker::PhantomData;
+use bplustree::{BPlusTreeError, BPlusTreeMap};
 
 mod test_utils;
 use test_utils::*;
-
-// ============================================================================
-// NODE REF TESTS
-// ============================================================================
-
-#[test]
-fn test_node_ref_id_and_is_leaf() {
-    let leaf: NodeRef<i32, i32> = NodeRef::Leaf(7, PhantomData);
-    assert_eq!(leaf.id(), 7);
-    assert!(leaf.is_leaf());
-
-    let branch: NodeRef<i32, i32> = NodeRef::Branch(13, PhantomData);
-    assert_eq!(branch.id(), 13);
-    assert!(!branch.is_leaf());
-}
 
 // ============================================================================
 // TRANSLATED PYTHON TESTS - Basic Operations

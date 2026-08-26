@@ -5,6 +5,13 @@ use core::ptr::{self, NonNull};
 
 use crate::layout::{carve_leaf, BranchLayout, LeafLayout, NodeHdr, NodeTag};
 
+// Every allocation here is matched by the free directly below it. Node blocks
+// are raw memory: allocating one does not construct keys or values, and
+// freeing one does not drop them. Whoever fills a node is responsible for
+// emptying it before the matching free (see `drop_subtree` for the
+// own-everything case, `free_emptied_leaf` / `free_emptied_branch` for the
+// incremental ones).
+
 #[inline]
 fn layout_for(bytes: usize, align: usize) -> Layout {
     // SAFETY: align is computed from type/layout alignments => power of two, non-zero.
@@ -30,6 +37,13 @@ pub unsafe fn alloc_leaf_block(layout: &LeafLayout) -> Option<NonNull<u8>> {
     let p = alloc_raw(layout.bytes, layout.max_align)?;
     init_leaf_block(p, layout);
     Some(p)
+}
+
+/// Free a leaf block: the inverse of `alloc_leaf_block`. Frees memory only,
+/// so the caller must already have emptied the leaf and unlinked it.
+#[inline]
+pub unsafe fn free_leaf_block(base: NonNull<u8>, layout: &LeafLayout) {
+    dealloc_raw(base, layout.bytes, layout.max_align);
 }
 
 /// Initialize an existing leaf block's header and siblings to defaults.
@@ -60,6 +74,13 @@ pub unsafe fn alloc_branch_block(layout: &BranchLayout) -> Option<NonNull<u8>> {
     let p = alloc_raw(layout.bytes, layout.max_align)?;
     init_branch_block(p);
     Some(p)
+}
+
+/// Free a branch block: the inverse of `alloc_branch_block`. Frees memory
+/// only, so the caller must already have emptied the branch of separators.
+#[inline]
+pub unsafe fn free_branch_block(base: NonNull<u8>, layout: &BranchLayout) {
+    dealloc_raw(base, layout.bytes, layout.max_align);
 }
 
 /// Initialize an existing branch block's header to defaults.
