@@ -144,6 +144,36 @@ impl<K, V> BPlusTreeMap<K, V> {
         }
     }
 
+    /// Shift a branch's keys `[idx..len)` and children `[idx+1..=len)` one
+    /// slot right, opening key slot `idx` and child slot `idx + 1` (a new
+    /// separator and the child to its right). Inverse of `branch_close_gap`.
+    #[inline(always)]
+    pub(crate) unsafe fn branch_open_gap(
+        &self,
+        keys: *mut K,
+        children: *mut *mut u8,
+        idx: usize,
+        len: usize,
+    ) {
+        core::ptr::copy(keys.add(idx), keys.add(idx + 1), len - idx);
+        core::ptr::copy(children.add(idx + 1), children.add(idx + 2), len - idx);
+    }
+
+    /// Shift a branch's keys `[idx+1..len)` and children `[idx+2..=len)` one
+    /// slot left, closing key slot `idx` and child slot `idx + 1`.
+    /// Inverse of `branch_open_gap`.
+    #[inline(always)]
+    pub(crate) unsafe fn branch_close_gap(
+        &self,
+        keys: *mut K,
+        children: *mut *mut u8,
+        idx: usize,
+        len: usize,
+    ) {
+        core::ptr::copy(keys.add(idx + 1), keys.add(idx), len - idx - 1);
+        core::ptr::copy(children.add(idx + 2), children.add(idx + 1), len - idx - 1);
+    }
+
     /// Shift key-value pairs left by one position (used after deletion).
     /// This batches the key and value copy operations together.
     #[inline(always)]

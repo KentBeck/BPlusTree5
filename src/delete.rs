@@ -115,36 +115,66 @@ impl<K: Ord + Clone, V> BPlusTreeMap<K, V> {
         free_leaf_block(leaf, &self.leaf_layout);
     }
 
+    /// Append every item of `source` onto the end of `target`, leaving
+    /// `source` empty. Bulk inverse of the leaf split's item move.
     unsafe fn merge_leaf_into(&self, target: NonNull<u8>, source: NonNull<u8>) {
-        let target_parts = layout::carve_leaf::<K, V>(target, &self.leaf_layout);
-        let source_parts = layout::carve_leaf::<K, V>(source, &self.leaf_layout);
+        let t = layout::carve_leaf::<K, V>(target, &self.leaf_layout);
+        let s = layout::carve_leaf::<K, V>(source, &self.leaf_layout);
 
-        let target_len = (*target_parts.hdr).len as usize;
-        let source_len = (*source_parts.hdr).len as usize;
+        let target_len = (*t.hdr).len as usize;
+        let source_len = (*s.hdr).len as usize;
+        debug_assert!(
+            target_len + source_len <= self.leaf_layout.cap as usize,
+            "leaf merge would overflow: callers merge only when both halves \
+             are at or below the minimum fill"
+        );
 
-        // CRITICAL FIX: Check if merge would exceed capacity
-        let merged_len = target_len + source_len;
-        if merged_len > self.leaf_layout.cap as usize {
-            // Cannot merge - would cause overflow. This should not happen if the
-            // rebalancing algorithm is correct, but we must prevent corruption.
-            panic!(
-                "Leaf merge would exceed capacity: {} > {}",
-                merged_len, self.leaf_layout.cap
-            );
-        }
+        core::ptr::copy_nonoverlapping(
+            s.keys_ptr as *const K,
+            (t.keys_ptr as *mut K).add(target_len),
+            source_len,
+        );
+        core::ptr::copy_nonoverlapping(
+            s.vals_ptr as *const V,
+            (t.vals_ptr as *mut V).add(target_len),
+            source_len,
+        );
 
-        let target_keys = target_parts.keys_ptr as *mut K;
-        let target_vals = target_parts.vals_ptr as *mut V;
-        let source_keys = source_parts.keys_ptr as *const K;
-        let source_vals = source_parts.vals_ptr as *const V;
+        (*t.hdr).len = (target_len + source_len) as u16;
+        (*s.hdr).len = 0;
+    }
 
-        for i in 0..source_len {
-            let (key, val) = self.read_kv_at(source_keys, source_vals, i);
-            self.write_kv_at(target_keys, target_vals, target_len + i, key, val);
-        }
+    /// Branch counterpart of `merge_leaf_into`: append `separator` and every
+    /// entry of `source` onto the end of `target`, leaving `source` empty.
+    /// The separator moves down to sit between target's old last child and
+    /// source's first child (leaf merges drop it instead: leaf keys carry
+    /// their own ordering).
+    unsafe fn merge_branch_into(&self, target: NonNull<u8>, separator: K, source: NonNull<u8>) {
+        let t = layout::carve_branch::<K>(target, &self.branch_layout);
+        let s = layout::carve_branch::<K>(source, &self.branch_layout);
 
-        (*target_parts.hdr).len = (target_len + source_len) as u16;
-        (*source_parts.hdr).len = 0;
+        let target_len = (*t.hdr).len as usize;
+        let source_len = (*s.hdr).len as usize;
+        debug_assert!(
+            target_len + 1 + source_len <= self.branch_layout.cap as usize,
+            "branch merge would overflow: callers merge only when both halves \
+             are at or below the minimum fill"
+        );
+
+        core::ptr::write((t.keys_ptr as *mut K).add(target_len), separator);
+        core::ptr::copy_nonoverlapping(
+            s.keys_ptr as *const K,
+            (t.keys_ptr as *mut K).add(target_len + 1),
+            source_len,
+        );
+        core::ptr::copy_nonoverlapping(
+            s.children_ptr as *const *mut u8,
+            (t.children_ptr as *mut *mut u8).add(target_len + 1),
+            source_len + 1,
+        );
+
+        (*t.hdr).len = (target_len + 1 + source_len) as u16;
+        (*s.hdr).len = 0;
     }
 
     unsafe fn fix_branch_child(&mut self, branch: NonNull<u8>, child_idx: usize) {
@@ -217,9 +247,9 @@ impl<K: Ord + Clone, V> BPlusTreeMap<K, V> {
         }
 
         if child_idx > 0 {
-            self.merge_leaf_with_left(branch, child_idx);
+            self.merge_leaf_pair(branch, child_idx - 1);
         } else if child_idx < branch_len {
-            self.merge_leaf_with_right(branch, child_idx);
+            self.merge_leaf_pair(branch, child_idx);
         }
     }
 
@@ -266,9 +296,9 @@ impl<K: Ord + Clone, V> BPlusTreeMap<K, V> {
         }
 
         if child_idx > 0 {
-            self.merge_branch_with_left(branch, child_idx);
+            self.merge_branch_pair(branch, child_idx - 1);
         } else if child_idx < branch_len {
-            self.merge_branch_with_right(branch, child_idx);
+            self.merge_branch_pair(branch, child_idx);
         }
     }
 
@@ -353,108 +383,18 @@ impl<K: Ord + Clone, V> BPlusTreeMap<K, V> {
         core::ptr::write(sep_slot, new_sep);
     }
 
-    unsafe fn merge_branch_with_left(&mut self, branch: NonNull<u8>, child_idx: usize) {
+    /// Merge the two children flanking separator `left_idx`:
+    /// `children[left_idx]` absorbs `children[left_idx + 1]`, and the
+    /// separator (returned by `remove_branch_entry`) moves down between them.
+    unsafe fn merge_branch_pair(&mut self, branch: NonNull<u8>, left_idx: usize) {
         let parts = layout::carve_branch::<K>(branch, &self.branch_layout);
-        let keys = parts.keys_ptr as *mut K;
         let children = parts.children_ptr as *mut *mut u8;
+        let left = NonNull::new_unchecked(*children.add(left_idx));
+        let right = NonNull::new_unchecked(*children.add(left_idx + 1));
 
-        let left_ptr = *children.add(child_idx - 1);
-        let child_ptr = *children.add(child_idx);
-        let left = NonNull::new_unchecked(left_ptr);
-        let child = NonNull::new_unchecked(child_ptr);
-
-        let left_parts = layout::carve_branch::<K>(left, &self.branch_layout);
-        let child_parts = layout::carve_branch::<K>(child, &self.branch_layout);
-
-        let left_len = (*left_parts.hdr).len as usize;
-        let child_len = (*child_parts.hdr).len as usize;
-
-        // CRITICAL FIX: Check if merge would exceed capacity
-        let merged_len = left_len + 1 + child_len; // left + separator + child
-        if merged_len > self.branch_layout.cap as usize {
-            // Cannot merge - would cause overflow. This should not happen if the
-            // rebalancing algorithm is correct, but we must prevent corruption.
-            panic!(
-                "Branch merge would exceed capacity: {} > {}",
-                merged_len, self.branch_layout.cap
-            );
-        }
-
-        let sep_slot = keys.add(child_idx - 1);
-        let sep_key = core::ptr::read(sep_slot);
-
-        let left_keys = left_parts.keys_ptr as *mut K;
-        let left_children = left_parts.children_ptr as *mut *mut u8;
-        let child_keys = child_parts.keys_ptr as *mut K;
-        let child_children = child_parts.children_ptr as *mut *mut u8;
-
-        core::ptr::write(left_keys.add(left_len), sep_key);
-        for i in 0..child_len {
-            core::ptr::write(
-                left_keys.add(left_len + 1 + i),
-                core::ptr::read(child_keys.add(i)),
-            );
-        }
-        for i in 0..=child_len {
-            *left_children.add(left_len + 1 + i) = *child_children.add(i);
-        }
-        (*left_parts.hdr).len = (left_len + 1 + child_len) as u16;
-        (*child_parts.hdr).len = 0;
-
-        self.free_emptied_branch(child);
-        self.collapse_branch_entry(branch, child_idx - 1);
-    }
-
-    unsafe fn merge_branch_with_right(&mut self, branch: NonNull<u8>, child_idx: usize) {
-        let parts = layout::carve_branch::<K>(branch, &self.branch_layout);
-        let keys = parts.keys_ptr as *mut K;
-        let children = parts.children_ptr as *mut *mut u8;
-
-        let child_ptr = *children.add(child_idx);
-        let right_ptr = *children.add(child_idx + 1);
-        let child = NonNull::new_unchecked(child_ptr);
-        let right = NonNull::new_unchecked(right_ptr);
-
-        let child_parts = layout::carve_branch::<K>(child, &self.branch_layout);
-        let right_parts = layout::carve_branch::<K>(right, &self.branch_layout);
-
-        let child_len = (*child_parts.hdr).len as usize;
-        let right_len = (*right_parts.hdr).len as usize;
-
-        // CRITICAL FIX: Check if merge would exceed capacity
-        let merged_len = child_len + 1 + right_len; // child + separator + right
-        if merged_len > self.branch_layout.cap as usize {
-            // Cannot merge - would cause overflow. This should not happen if the
-            // rebalancing algorithm is correct, but we must prevent corruption.
-            panic!(
-                "Branch merge would exceed capacity: {} > {}",
-                merged_len, self.branch_layout.cap
-            );
-        }
-
-        let sep_slot = keys.add(child_idx);
-        let sep_key = core::ptr::read(sep_slot);
-
-        let child_keys = child_parts.keys_ptr as *mut K;
-        let child_children = child_parts.children_ptr as *mut *mut u8;
-        let right_keys = right_parts.keys_ptr as *mut K;
-        let right_children = right_parts.children_ptr as *mut *mut u8;
-
-        core::ptr::write(child_keys.add(child_len), sep_key);
-        for i in 0..right_len {
-            core::ptr::write(
-                child_keys.add(child_len + 1 + i),
-                core::ptr::read(right_keys.add(i)),
-            );
-        }
-        for i in 0..=right_len {
-            *child_children.add(child_len + 1 + i) = *right_children.add(i);
-        }
-        (*child_parts.hdr).len = (child_len + 1 + right_len) as u16;
-        (*right_parts.hdr).len = 0;
-
+        let separator = self.remove_branch_entry(branch, left_idx);
+        self.merge_branch_into(left, separator, right);
         self.free_emptied_branch(right);
-        self.collapse_branch_entry(branch, child_idx);
     }
 
     /// Free an emptied branch's memory. Like `free_emptied_leaf`, the caller
@@ -479,33 +419,6 @@ impl<K: Ord + Clone, V> BPlusTreeMap<K, V> {
             ptr::drop_in_place((parts.keys_ptr as *mut K).add(i));
         }
         (*parts.hdr).len = 0;
-    }
-
-    unsafe fn collapse_branch_entry(&mut self, branch: NonNull<u8>, key_idx: usize) {
-        let parts = layout::carve_branch::<K>(branch, &self.branch_layout);
-        let len = (*parts.hdr).len as usize;
-        if key_idx >= len {
-            return;
-        }
-
-        let keys = parts.keys_ptr as *mut K;
-        let children = parts.children_ptr as *mut *mut u8;
-
-        // Note: The key at key_idx has already been ptr::read out by the caller,
-        // so we must not drop it here. We just shift the remaining keys.
-        if key_idx < len - 1 {
-            core::ptr::copy(keys.add(key_idx + 1), keys.add(key_idx), len - key_idx - 1);
-        }
-        // After shifting, the last key slot (at len-1) now contains a duplicate.
-        // We must not drop it, so we'll rely on the length being decremented.
-
-        core::ptr::copy(
-            children.add(key_idx + 2),
-            children.add(key_idx + 1),
-            len - key_idx,
-        );
-        *children.add(len) = ptr::null_mut();
-        (*parts.hdr).len = (len - 1) as u16;
     }
 
     unsafe fn borrow_from_left_leaf(&mut self, branch: NonNull<u8>, child_idx: usize) {
@@ -604,57 +517,35 @@ impl<K: Ord + Clone, V> BPlusTreeMap<K, V> {
         core::ptr::write(sep_slot, new_sep);
     }
 
-    unsafe fn merge_leaf_with_left(&mut self, branch: NonNull<u8>, child_idx: usize) {
+    /// Merge the two children flanking separator `left_idx`:
+    /// `children[left_idx]` absorbs `children[left_idx + 1]`. Leaf keys carry
+    /// their own ordering, so the separator is redundant and dropped.
+    unsafe fn merge_leaf_pair(&mut self, branch: NonNull<u8>, left_idx: usize) {
         let parts = layout::carve_branch::<K>(branch, &self.branch_layout);
         let children = parts.children_ptr as *mut *mut u8;
+        let left = NonNull::new_unchecked(*children.add(left_idx));
+        let right = NonNull::new_unchecked(*children.add(left_idx + 1));
 
-        let left_ptr = *children.add(child_idx - 1);
-        let child_ptr = *children.add(child_idx);
-        let left = NonNull::new_unchecked(left_ptr);
-        let child = NonNull::new_unchecked(child_ptr);
-
-        self.merge_leaf_into(left, child);
-        self.free_emptied_leaf(child);
-        self.remove_branch_entry(branch, child_idx - 1);
-    }
-
-    unsafe fn merge_leaf_with_right(&mut self, branch: NonNull<u8>, child_idx: usize) {
-        let parts = layout::carve_branch::<K>(branch, &self.branch_layout);
-        let children = parts.children_ptr as *mut *mut u8;
-
-        let child_ptr = *children.add(child_idx);
-        let right_ptr = *children.add(child_idx + 1);
-        let child = NonNull::new_unchecked(child_ptr);
-        let right = NonNull::new_unchecked(right_ptr);
-
-        self.merge_leaf_into(child, right);
+        self.merge_leaf_into(left, right);
         self.free_emptied_leaf(right);
-        self.remove_branch_entry(branch, child_idx);
+        drop(self.remove_branch_entry(branch, left_idx));
     }
 
-    unsafe fn remove_branch_entry(&mut self, branch: NonNull<u8>, key_idx: usize) {
+    /// Remove separator `key_idx` and the child slot to its right, returning
+    /// the separator by value: branch merges move it down, leaf merges drop
+    /// it. The caller owns freeing the removed child's node.
+    unsafe fn remove_branch_entry(&mut self, branch: NonNull<u8>, key_idx: usize) -> K {
         let parts = layout::carve_branch::<K>(branch, &self.branch_layout);
         let len = (*parts.hdr).len as usize;
-        if key_idx >= len {
-            return;
-        }
+        debug_assert!(key_idx < len, "separator index out of range");
 
         let keys = parts.keys_ptr as *mut K;
         let children = parts.children_ptr as *mut *mut u8;
 
-        let removed = core::ptr::read(keys.add(key_idx));
-        drop(removed);
-        if key_idx < len - 1 {
-            core::ptr::copy(keys.add(key_idx + 1), keys.add(key_idx), len - key_idx - 1);
-        }
-
-        core::ptr::copy(
-            children.add(key_idx + 2),
-            children.add(key_idx + 1),
-            len - key_idx,
-        );
-        *children.add(len) = ptr::null_mut();
+        let separator = core::ptr::read(keys.add(key_idx));
+        self.branch_close_gap(keys, children, key_idx, len);
         (*parts.hdr).len = (len - 1) as u16;
+        separator
     }
 
     unsafe fn remove_rec(&mut self, node: NonNull<u8>, key: &K) -> Option<V> {
