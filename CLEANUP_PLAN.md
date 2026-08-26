@@ -17,7 +17,38 @@ raw slots, and the net catches any double-drop, leak, or ordering mistake.
 One step per commit. After the delete.rs steps, re-run `perf_probe` and
 `bench_delete` to confirm no perf regression (delete currently beats std).
 
-## Phase 1 — truthful names and dead weight (mechanical)
+## Phase 1 — truthful names and dead weight (mechanical) — DONE
+
+1. ~~**Fix the inverted free names.**~~ — DONE. `free_tree_no_drop` →
+   `drop_subtree` (its doc comment lied too: it said "without dropping K,V"
+   while dropping every key and value). `free_leaf_node` →
+   `free_emptied_leaf`, `free_branch_node` → `free_emptied_branch`, both
+   with the precondition as a `debug_assert_eq!(len, 0)` instead of an
+   8-line comment. `free_emptied_branch`'s conditional key-dropping moved
+   into a new `empty_branch`, called by the one path that needs it (root
+   collapse, where separators are still owned because nothing moved them);
+   the two merge paths always pass emptied nodes, so both free functions
+   now share one contract: *contents already gone, node is just memory*.
+   Both new asserts were verified to sit on live paths (inverting them
+   fails the fuzz suite), so they are real checks, not decoration.
+
+2. ~~**Delete or repair the lying stubs.**~~ — DONE. `validate()` and
+   `NULL_NODE` were dead everywhere (no caller in `src/` or `tests/`) and
+   are deleted. `validate_for_operation` — also an unconditional `Ok(())`,
+   but genuinely called by two test files — now runs
+   `check_invariants_detailed()` and names the operation in the error, so
+   those assertions test something. The remaining compat surface
+   (`NodeRef`, `BTreeResultExt`, `try_*`, `get_many`, ...) is all
+   test-called and stays; `NodeRef` now carries a doc comment saying it is
+   an arena-era vestige no implementation code produces or consumes. The
+   module comment no longer promises removal "as the implementation
+   matures" — it says what the section is.
+
+   Note for later: `NodeRef` and its test (tests/bplus_tree.rs:13-17)
+   only exercise each other. Deleting both is a defensible follow-up, but
+   it removes a test, so it is left as an explicit call for the author.
+
+### Original notes
 
 1. **Fix the inverted free names.** `free_tree_no_drop` (lib.rs) *does* drop
    every key and value; `free_leaf_node` (delete.rs) does *not* and carries

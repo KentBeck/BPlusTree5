@@ -43,7 +43,7 @@ impl<K: Ord + Clone, V> BPlusTreeMap<K, V> {
                             NodeTag::Leaf => {
                                 let child = NonNull::new_unchecked(child_ptr);
                                 if (*child_hdr).len == 0 {
-                                    self.free_leaf_node(child);
+                                    self.free_emptied_leaf(child);
                                     *slot = ptr::null_mut();
                                     continue;
                                 }
@@ -58,7 +58,7 @@ impl<K: Ord + Clone, V> BPlusTreeMap<K, V> {
                                         return;
                                     }
                                     self.merge_leaf_into(existing, child);
-                                    self.free_leaf_node(child);
+                                    self.free_emptied_leaf(child);
                                     *slot = ptr::null_mut();
                                 } else {
                                     keep_child = Some(child);
@@ -75,16 +75,18 @@ impl<K: Ord + Clone, V> BPlusTreeMap<K, V> {
                         }
                     }
 
+                    // Unlike the merge paths, a collapsing root still owns its
+                    // separators: nothing moved them elsewhere.
+                    self.empty_branch(root);
                     if let Some(child) = keep_child {
                         if keep_is_leaf {
                             self.make_leaf_root(child);
                         }
                         self.root = Some(child);
-                        self.free_branch_node(root);
                     } else {
                         self.root = None;
-                        self.free_branch_node(root);
                     }
+                    self.free_emptied_branch(root);
                 }
             }
         }
@@ -97,8 +99,16 @@ impl<K: Ord + Clone, V> BPlusTreeMap<K, V> {
         }
     }
 
-    unsafe fn free_leaf_node(&mut self, leaf: NonNull<u8>) {
+    /// Unlink an emptied leaf from the sibling chain and free its memory.
+    /// The caller must already have moved every item out: this frees memory
+    /// only, it never drops contents (contrast `drop_subtree`).
+    unsafe fn free_emptied_leaf(&mut self, leaf: NonNull<u8>) {
         let parts = layout::carve_leaf::<K, V>(leaf, &self.leaf_layout);
+        debug_assert_eq!(
+            (*parts.hdr).len,
+            0,
+            "free_emptied_leaf called on a leaf that still holds items"
+        );
         let next = *parts.next_ptr;
         let prev = match parts.prev_ptr {
             Some(prev_ptr) => *prev_ptr,
@@ -124,12 +134,6 @@ impl<K: Ord + Clone, V> BPlusTreeMap<K, V> {
         if let Some(prev_ptr) = parts.prev_ptr {
             *prev_ptr = ptr::null_mut();
         }
-
-        // NOTE: We do NOT drop keys/values here because:
-        // 1. Merge operations set len=0 after moving items out
-        // 2. Items should already be dropped by the time we free the node
-        // 3. Dropping here would cause double-free
-        // The only exception is in free_tree_no_drop which handles cleanup differently
 
         dealloc_raw(leaf, self.leaf_layout.bytes, self.leaf_layout.max_align);
     }
@@ -420,7 +424,7 @@ impl<K: Ord + Clone, V> BPlusTreeMap<K, V> {
         (*left_parts.hdr).len = (left_len + 1 + child_len) as u16;
         (*child_parts.hdr).len = 0;
 
-        self.free_branch_node(child);
+        self.free_emptied_branch(child);
         self.collapse_branch_entry(branch, child_idx - 1);
     }
 
@@ -472,20 +476,32 @@ impl<K: Ord + Clone, V> BPlusTreeMap<K, V> {
         (*child_parts.hdr).len = (child_len + 1 + right_len) as u16;
         (*right_parts.hdr).len = 0;
 
-        self.free_branch_node(right);
+        self.free_emptied_branch(right);
         self.collapse_branch_entry(branch, child_idx);
     }
 
-    unsafe fn free_branch_node(&mut self, node: NonNull<u8>) {
+    /// Free an emptied branch's memory. Like `free_emptied_leaf`, the caller
+    /// must already have moved or dropped every separator; use `empty_branch`
+    /// for a branch that still owns its keys.
+    unsafe fn free_emptied_branch(&mut self, node: NonNull<u8>) {
+        let parts = layout::carve_branch::<K>(node, &self.branch_layout);
+        debug_assert_eq!(
+            (*parts.hdr).len,
+            0,
+            "free_emptied_branch called on a branch that still holds separators"
+        );
+        dealloc_raw(node, self.branch_layout.bytes, self.branch_layout.max_align);
+    }
+
+    /// Drop the separators a branch still owns and mark it empty, so it meets
+    /// `free_emptied_branch`'s precondition.
+    unsafe fn empty_branch(&mut self, node: NonNull<u8>) {
         let parts = layout::carve_branch::<K>(node, &self.branch_layout);
         let len = (*parts.hdr).len as usize;
-
-        // Drop all separator keys before deallocating
         for i in 0..len {
             ptr::drop_in_place((parts.keys_ptr as *mut K).add(i));
         }
-
-        dealloc_raw(node, self.branch_layout.bytes, self.branch_layout.max_align);
+        (*parts.hdr).len = 0;
     }
 
     unsafe fn collapse_branch_entry(&mut self, branch: NonNull<u8>, key_idx: usize) {
@@ -621,7 +637,7 @@ impl<K: Ord + Clone, V> BPlusTreeMap<K, V> {
         let child = NonNull::new_unchecked(child_ptr);
 
         self.merge_leaf_into(left, child);
-        self.free_leaf_node(child);
+        self.free_emptied_leaf(child);
         self.remove_branch_entry(branch, child_idx - 1);
     }
 
@@ -635,7 +651,7 @@ impl<K: Ord + Clone, V> BPlusTreeMap<K, V> {
         let right = NonNull::new_unchecked(right_ptr);
 
         self.merge_leaf_into(child, right);
-        self.free_leaf_node(right);
+        self.free_emptied_leaf(right);
         self.remove_branch_entry(branch, child_idx);
     }
 

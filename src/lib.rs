@@ -39,7 +39,7 @@ impl<K, V> Drop for BPlusTreeMap<K, V> {
     fn drop(&mut self) {
         if let Some(root) = self.root.take() {
             unsafe {
-                self.free_tree_no_drop(root);
+                self.drop_subtree(root);
             }
         }
     }
@@ -80,8 +80,11 @@ impl<K, V> BPlusTreeMap<K, V> {
         &self.branch_layout
     }
 
-    /// Recursively free all nodes without dropping K,V (for Drop impl).
-    unsafe fn free_tree_no_drop(&mut self, node: NonNull<u8>) {
+    /// Drop every key and value the subtree owns, then free its nodes.
+    /// Used by `Drop` and `clear`, which own the whole tree; the incremental
+    /// paths in `delete` instead free nodes whose contents have already moved
+    /// elsewhere (see `free_emptied_leaf` / `free_emptied_branch`).
+    unsafe fn drop_subtree(&mut self, node: NonNull<u8>) {
         let hdr = &*(node.as_ptr() as *const NodeHdr);
         match hdr.tag {
             NodeTag::Leaf => {
@@ -104,7 +107,7 @@ impl<K, V> BPlusTreeMap<K, V> {
                 for i in 0..=len {
                     let child_ptr = *((parts.children_ptr as *const *mut u8).add(i));
                     if let Some(child) = NonNull::new(child_ptr) {
-                        self.free_tree_no_drop(child);
+                        self.drop_subtree(child);
                     }
                 }
 
@@ -122,16 +125,14 @@ impl<K, V> BPlusTreeMap<K, V> {
 // =============================
 // Public API surface (compat scaffolding)
 // =============================
-// Note: This module currently exposes a superset of the intended public API to
-// satisfy imported tests from a previous project. Many of these functions are
-// temporary shims or stubs (e.g., arena stats) and will be gated or removed as
-// the raw-memory implementation matures.
+// This section exists so the test suite imported from BPlusTree3 compiles
+// against this implementation. Everything here is either a real operation
+// (get_item, remove_item, batch_insert, ...) or, where marked, a vestige of
+// that arena-based design that this raw-memory tree no longer has.
 
 use alloc::format;
 use alloc::string::String;
 use core::fmt;
-
-pub const NULL_NODE: u32 = u32::MAX;
 
 #[derive(Debug)]
 pub enum BPlusTreeError {
@@ -162,6 +163,9 @@ impl fmt::Display for BPlusTreeError {
 
 impl core::error::Error for BPlusTreeError {}
 
+/// Vestigial: BPlusTree3 addressed nodes by arena id, and its test suite still
+/// constructs these. This tree addresses nodes by raw pointer, so nothing in
+/// the implementation produces or consumes a `NodeRef`.
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
 pub enum NodeRef<K, V> {
     Leaf(u32, PhantomData<(K, V)>),
@@ -248,7 +252,7 @@ impl<K: Ord + Clone, V> BPlusTreeMap<K, V> {
     pub fn clear(&mut self) {
         if let Some(root) = self.root.take() {
             unsafe {
-                self.free_tree_no_drop(root);
+                self.drop_subtree(root);
             }
         }
     }
@@ -368,11 +372,10 @@ impl Eq for BPlusTreeError {}
 // Extra convenience/debug API stubs used in tests
 #[cfg(feature = "compat_test_api")]
 impl<K: Ord + Clone, V> BPlusTreeMap<K, V> {
-    pub fn validate(&self) -> BTreeResult<()> {
-        Ok(())
-    }
-    pub fn validate_for_operation(&self, _op: &str) -> BTreeResult<()> {
-        Ok(())
+    /// Check every tree invariant, naming `op` in the error if any fails.
+    pub fn validate_for_operation(&self, op: &str) -> BTreeResult<()> {
+        self.check_invariants_detailed()
+            .map_err(|why| BPlusTreeError::data_integrity(op, &why))
     }
     pub fn try_get(&self, key: &K) -> KeyResult<&V> {
         self.get_item(key)
