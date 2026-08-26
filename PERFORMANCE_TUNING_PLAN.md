@@ -158,15 +158,25 @@ c. **Branchless intra-node binary search + child prefetch.**
    "router" of evenly spaced keys). Measure with cachegrind miss counts
    first, wall clock second.
 
-### 5. Decoupled leaf/branch capacities (within the large-cap regime)
+### 5. ~~Decoupled leaf/branch capacities~~ — DONE (`with_caps`)
 
-`new(capacity)` (`lib.rs:184`) uses one number for both layouts, but the
-sweep shows the tension: insert cost rises with leaf size (memmove of half a
-leaf per insert), while descent depth falls with branch fan-out. A config
-like leaf=64 / branch=256 plausibly beats uniform 128 on inserts without
-giving up lookup depth. Add `with_caps(leaf_cap, branch_cap)`, grid-measure
-{64,128,256}×{128,256,512}, and set `new()`'s internal split to the winner.
-No configuration below 64 is in scope.
+`with_caps(leaf_cap, branch_cap)` decouples the two; `new(c)` is now
+`with_caps(c, c)`. The differential fuzzer covers asymmetric configurations
+in both directions (including under Miri).
+
+Grid measurements (cachegrind, 200k hash-scattered inserts, workload-phase
+deltas): leaf 32 cuts insert D1 misses 37% vs leaf 128 (3.56M → 2.23M) and
+leaf 64 cuts 29%; get misses are unchanged; iteration/range pay +8–20% in
+the simulator. On real hardware (interleaved wall clock, 1M keys) the scan
+penalty vanishes behind prefetch and **`with_caps(32, 256)` won or tied
+`new(128)` in every round of every workload**: build ~0.32s vs 0.37s,
+build+get ~0.63s vs 0.80s (leaf search touches 4 cache lines, not 16),
+build+range ~0.34s vs 0.42s, build+iter a tie. That puts random insert at
+~1.2–1.3× of std (from 1.4–1.6× at uniform 128) and widens the get lead.
+
+Whether `new()` should default to a split like this is an API-taste call
+for the author; the benches keep `new(128)` as the standard config, and
+`perf_probe` prints a `32/256` row alongside for comparison.
 
 ### 6. Node allocation pooling (churn workloads)
 

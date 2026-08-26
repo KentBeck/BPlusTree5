@@ -27,6 +27,16 @@ fn main() {
         println!("  bplustree cap={:<4} {:.3}s ({:.2} Mops)", cap, dt, n as f64 / dt / 1e6);
         black_box(&m);
     }
+    {
+        let t0 = Instant::now();
+        let mut m = BPlusTreeMap::with_caps(32, 256).unwrap();
+        for &k in &keys {
+            m.insert(k, k);
+        }
+        let dt = t0.elapsed().as_secs_f64();
+        println!("  bplustree 32/256 {:.3}s ({:.2} Mops)", dt, n as f64 / dt / 1e6);
+        black_box(&m);
+    }
     let t0 = Instant::now();
     let mut sm = BTreeMap::new();
     for &k in &keys {

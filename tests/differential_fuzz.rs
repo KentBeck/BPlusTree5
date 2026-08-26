@@ -69,14 +69,20 @@ fn random_bound(rng: &mut Rng, key_space: u64) -> Bound<i64> {
 }
 
 fn run_differential(seed: u64, capacity: usize, ops: usize, key_space: u64) {
+    run_differential_caps(seed, capacity, capacity, ops, key_space)
+}
+
+fn run_differential_caps(seed: u64, leaf_cap: usize, branch_cap: usize, ops: usize, key_space: u64) {
     // Miri runs orders of magnitude slower; a few hundred ops per config is
     // still enough to cross split/merge/borrow paths at small capacities.
     let ops = if cfg!(miri) { ops.min(300) } else { ops };
     let mut rng = Rng(seed);
     let live = Arc::new(AtomicUsize::new(0));
-    let mut tree: BPlusTreeMap<i64, Tracked> = BPlusTreeMap::new(capacity).unwrap();
+    let mut tree: BPlusTreeMap<i64, Tracked> =
+        BPlusTreeMap::with_caps(leaf_cap, branch_cap).unwrap();
     let mut model: BTreeMap<i64, i64> = BTreeMap::new();
-    let ctx = |op: usize| format!("seed={:#x} cap={} op#{}", seed, capacity, op);
+    let ctx =
+        |op: usize| format!("seed={:#x} caps={}/{} op#{}", seed, leaf_cap, branch_cap, op);
 
     for op in 0..ops {
         match rng.below(100) {
@@ -247,9 +253,10 @@ fn run_differential(seed: u64, capacity: usize, ops: usize, key_space: u64) {
     assert_eq!(
         live.load(Ordering::SeqCst),
         0,
-        "leak detected after final drop: seed={:#x} cap={}",
+        "leak detected after final drop: seed={:#x} caps={}/{}",
         seed,
-        capacity
+        leaf_cap,
+        branch_cap
     );
 }
 
@@ -264,6 +271,20 @@ fn differential_fuzz_small_capacities() {
 fn differential_fuzz_medium_capacities() {
     for &cap in &[8usize, 12, 16, 32] {
         run_differential(0x5EED_0100 + cap as u64, cap, 6_000, 1_000);
+    }
+}
+
+#[test]
+fn differential_fuzz_asymmetric_caps() {
+    // Decoupled leaf/branch capacities, skewed in both directions.
+    for &(leaf, branch) in &[(4usize, 32usize), (32, 4), (8, 128), (128, 8), (64, 256)] {
+        run_differential_caps(
+            0x5EED_0300 ^ ((leaf as u64) << 16) ^ branch as u64,
+            leaf,
+            branch,
+            6_000,
+            500,
+        );
     }
 }
 

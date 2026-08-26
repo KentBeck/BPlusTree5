@@ -182,12 +182,21 @@ impl<K, V> NodeRef<K, V> {
 impl<K: Ord + Clone, V> BPlusTreeMap<K, V> {
     // ===== Compatibility constructors =====
     pub fn new(capacity: usize) -> Result<Self, BPlusTreeError> {
-        if capacity < 4 {
+        Self::with_caps(capacity, capacity)
+    }
+
+    /// Construct with independent leaf and branch capacities (entries per
+    /// node). Inserts shift half a leaf on average, so smaller leaves make
+    /// inserts cheaper, while larger branches keep the tree shallow for
+    /// lookups; decoupling the two lets a workload pick both.
+    pub fn with_caps(leaf_cap: usize, branch_cap: usize) -> Result<Self, BPlusTreeError> {
+        if leaf_cap < 4 || branch_cap < 4 {
             return Err(BPlusTreeError::InvalidCapacity("capacity too small".into()));
         }
-        let cap_u16 = core::cmp::min(capacity as u16, u16::MAX);
-        let leaf_layout = LeafLayout::compute_for_cap::<K, V>(cap_u16, true);
-        let branch_layout = BranchLayout::compute_for_cap::<K>(cap_u16);
+        let leaf_u16 = core::cmp::min(leaf_cap, u16::MAX as usize) as u16;
+        let branch_u16 = core::cmp::min(branch_cap, u16::MAX as usize) as u16;
+        let leaf_layout = LeafLayout::compute_for_cap::<K, V>(leaf_u16, true);
+        let branch_layout = BranchLayout::compute_for_cap::<K>(branch_u16);
         let mut tree = Self {
             root: None,
             leaf_layout,
