@@ -114,7 +114,12 @@ fn run_differential_caps(seed: u64, leaf_cap: usize, branch_cap: usize, ops: usi
                     "get mismatch: {}",
                     ctx(op)
                 );
-                assert_eq!(tree.contains_key(&k), model.contains_key(&k));
+                assert_eq!(
+                    tree.contains_key(&k),
+                    model.contains_key(&k),
+                    "contains_key mismatch: {}",
+                    ctx(op)
+                );
             }
             // get_mut and mutate (5%)
             80..=84 => {

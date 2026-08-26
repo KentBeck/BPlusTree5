@@ -83,11 +83,9 @@ obligation in every mutation path).
 
 The cost profile if it stays O(n): any caller that consults `len()` per
 operation (capacity-eviction guards, per-tick metrics) goes quadratic;
-drain-until-empty loops are fine now that `is_empty()` is O(1). Independent of that decision, do the
-cheap decoupling: `items()` (`iterate.rs:275`) calls `len()` only to seed
-`size_hint`, so today every full-iterator construction pays an O(n) walk
-before the first element — make the iterator track position lazily instead,
-and document `len()` as O(n) if it stays that way.
+drain-until-empty loops are fine now that `is_empty()` is O(1), and
+`items()` no longer touches `len()` (done as part of item 3). If `len()`
+stays O(n), document it as such.
 
 ### 2. ~~`first()` and `last()` in O(log n)~~ — DONE
 

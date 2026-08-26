@@ -17,6 +17,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
       # Builds every target (lib, tests, benches, profiling bins) and runs the
@@ -31,8 +33,13 @@ jobs:
   miri:
     name: Miri (undefined behavior check)
     runs-on: ubuntu-latest
+    # The Miri jobs finish in a few minutes; a hang should fail fast, not
+    # consume the 6-hour default.
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
       - uses: dtolnay/rust-toolchain@nightly
         with:
           components: miri

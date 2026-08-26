@@ -11,6 +11,7 @@ fn main() {
     let leaf_cap: usize = args.first().map_or(128, |a| a.parse().expect("leaf_cap"));
     let branch_cap: usize = args.get(1).map_or(leaf_cap, |a| a.parse().expect("branch_cap"));
     let n: usize = args.get(2).map_or(200_000, |a| a.parse().expect("n"));
+    assert!(n > 0, "n must be greater than zero");
     let phase = args.get(3).map_or("build", |a| a.as_str());
 
     let key = |i: u64| i.wrapping_mul(0x9E3779B97F4A7C15);

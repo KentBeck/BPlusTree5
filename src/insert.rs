@@ -158,7 +158,7 @@ impl<K: Ord + Clone, V> BPlusTreeMap<K, V> {
             // Promote original key at pm-1
             let promote = core::ptr::read((b.keys_ptr as *const K).add(pm - 1));
 
-            // Move keys [pm .. len) to right; clear source
+            // Move keys [pm .. len) to right; left hdr.len excludes them
             let keys_move = len - pm;
             if keys_move > 0 {
                 core::ptr::copy_nonoverlapping(
@@ -169,7 +169,7 @@ impl<K: Ord + Clone, V> BPlusTreeMap<K, V> {
             }
             (*rb.hdr).len = keys_move as u16;
 
-            // Move children [pm .. len] to right; clear source
+            // Move children [pm .. len] to right; left hdr.len excludes them
             let cnt = (len + 1) - pm;
             core::ptr::copy_nonoverlapping(cbase_src.add(pm), cbase_dst, cnt);
 
@@ -206,7 +206,7 @@ impl<K: Ord + Clone, V> BPlusTreeMap<K, V> {
             // Promote the inserted key; do not store it in either child
             let promote = ins_key;
 
-            // Move keys [pm .. len) to right; clear source
+            // Move keys [pm .. len) to right; left hdr.len excludes them
             let keys_move = len - pm;
             if keys_move > 0 {
                 core::ptr::copy_nonoverlapping(
@@ -235,7 +235,7 @@ impl<K: Ord + Clone, V> BPlusTreeMap<K, V> {
             // Promote original key at pm
             let promote = core::ptr::read((b.keys_ptr as *const K).add(pm));
 
-            // Move keys [pm+1 .. len) to right; clear source
+            // Move keys [pm+1 .. len) to right; left hdr.len excludes them
             let keys_move = len.saturating_sub(pm + 1);
             if keys_move > 0 {
                 core::ptr::copy_nonoverlapping(
@@ -345,7 +345,9 @@ impl<K: Ord + Clone, V> BPlusTreeMap<K, V> {
                     self.insert_into_leaf_slot(parts, idx, len, key, value);
                     InsertResult::NoSplit(None)
                 } else {
-                    // Zero-allocation in-place split: move upper half to right, insert new item, clear moved slots
+                    // Zero-allocation in-place split: move the upper half to the right
+                    // leaf and insert the new item. Moved-from slots stay
+                    // physically populated; each node's hdr.len excludes them.
                     let total_items = len + 1;
                     let left_count = total_items / 2;
                     let right_count = total_items - left_count;
