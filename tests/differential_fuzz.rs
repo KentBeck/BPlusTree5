@@ -177,6 +177,12 @@ fn run_differential(seed: u64, capacity: usize, ops: usize, key_space: u64) {
         }
         assert_eq!(tree.len(), model.len(), "len mismatch: {}", ctx(op));
         assert_eq!(
+            tree.is_empty(),
+            model.is_empty(),
+            "is_empty mismatch: {}",
+            ctx(op)
+        );
+        assert_eq!(
             live.load(Ordering::SeqCst),
             model.len(),
             "live-object count diverged (leak or double free): {}",

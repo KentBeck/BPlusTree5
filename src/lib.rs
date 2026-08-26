@@ -203,7 +203,15 @@ impl<K: Ord + Clone, V> BPlusTreeMap<K, V> {
     }
 
     pub fn is_empty(&self) -> bool {
-        self.len() == 0
+        match self.root {
+            None => true,
+            Some(p) => unsafe {
+                let hdr = &*(p.as_ptr() as *const NodeHdr);
+                // A branch root always has at least one child and non-root
+                // leaves are never empty, so a branch root implies non-empty.
+                hdr.tag == NodeTag::Leaf && hdr.len == 0
+            },
+        }
     }
 
     pub fn len(&self) -> usize {

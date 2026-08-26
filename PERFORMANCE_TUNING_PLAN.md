@@ -50,7 +50,7 @@ Losses:
 
 | Operation                              | vs std::BTreeMap                 |
 |----------------------------------------|----------------------------------|
-| `len()` / `is_empty()` (1M items)      | O(n) vs O(1) (~0.4 ms per call)  |
+| `len()` (1M items)                     | O(n) vs O(1) (~0.4 ms per call)  |
 | random insert                          | 1.16× slower (bench_insert keys) to 1.6× slower (hash-scattered probe keys) |
 | range scan, 100–10k items              | 1.6–2.1× slower                  |
 | tiny cursor iterations (10 items)      | 1.16× slower                     |
@@ -63,18 +63,21 @@ get/iteration prefer the larger nodes. That tension motivates item 5.
 
 ## P0 — asymptotic bugs (large wins, low risk)
 
-### 1. `len()` / `is_empty()` are O(n) — decision pending
+### 1. `len()` is O(n) — decision pending (`is_empty()` now O(1))
 
-`lib.rs:209` computes `len()` by walking the entire leaf linked list
-(~0.4 ms at 1M items; every other mainstream map is O(1)). The obvious fix —
+`lib.rs` computes `len()` by walking the entire leaf linked list
+(~0.4 ms at 1M items; every other mainstream map is O(1)). `is_empty()` no
+longer pays this: the invariants (a branch root has children; non-root
+leaves are never empty) mean emptiness is decidable from the root header
+alone, so it is now O(1) and checked against std::BTreeMap by the fuzzer. The obvious fix —
 a cached `len: usize` maintained by insert/remove/clear and cross-checked by
 `check_invariants_detailed` so the fuzzer validates it on every mutation — is
 one the author is reluctant to take on (a denormalization plus a maintenance
 obligation in every mutation path).
 
-The cost profile if it stays O(n): any caller that consults `len()` or
-`is_empty()` per operation (capacity-eviction guards, drain-until-empty
-loops, per-tick metrics) goes quadratic. Independent of that decision, do the
+The cost profile if it stays O(n): any caller that consults `len()` per
+operation (capacity-eviction guards, per-tick metrics) goes quadratic;
+drain-until-empty loops are fine now that `is_empty()` is O(1). Independent of that decision, do the
 cheap decoupling: `items()` (`iterate.rs:275`) calls `len()` only to seed
 `size_hint`, so today every full-iterator construction pays an O(n) walk
 before the first element — make the iterator track position lazily instead,
