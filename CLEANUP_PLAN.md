@@ -70,11 +70,13 @@ One step per commit. After the delete.rs steps, re-run `perf_probe` and
    Also done alongside: `NodeRef` and its self-referential test deleted
    (the Phase 1 follow-up left for the author's call).
 
-## Phase 3 — delete.rs: eight functions are really three ideas
+## Phase 3 — delete.rs: eight functions are really three ideas — DONE
 
-Biggest win: ~200 of delete.rs's 708 lines are near-mirror duplicates.
+Landed as three commits (3a merges, 3b rotations, 3c twin rebalancers);
+delete.rs went from 708 to 534 lines, and every step passed the full
+fuzz+Miri gate with bench_delete unchanged. Notes against the plan:
 
-5. **Make separator ownership flow through return values.**
+5. ~~DONE (3a).~~ **Make separator ownership flow through return values.**
    `remove_branch_entry` and `collapse_branch_entry` are the same 25-line
    operation, split in two because one caller pre-reads the separator key.
    Change `remove_branch_entry` to *return* the separator `K`; branch merges
@@ -82,38 +84,49 @@ Biggest win: ~200 of delete.rs's 708 lines are near-mirror duplicates.
    "must not drop" comments disappear — the ownership subtlety becomes
    type-checked instead of commented.
 
-6. **Two merges per kind → one.** `merge_leaf_with_left(b, i)` is
+6. ~~DONE (3a).~~ **Two merges per kind → one.** `merge_leaf_with_left(b, i)` is
    `merge_leaf_with_right(b, i-1)`: both merge `children[j+1]` into
    `children[j]` and remove separator `j`. Replace each with-left/with-right
    pair with one `merge_leaf_pair(branch, left_idx)` /
    `merge_branch_pair(branch, left_idx)`; the rebalancer picks `left_idx`.
    (The two branch merges today are the same code with variables renamed.)
 
-7. **Borrows are rotations.** `borrow_from_left_*` rotates an entry right
+7. ~~DONE (3b).~~ **Borrows are rotations.** Kept as mirrored left/right
+   pairs rather than one direction-parameterized function — the direction
+   difference is the visible textual difference, per step 8's own warning. `borrow_from_left_*` rotates an entry right
    through the parent separator; `borrow_from_right_*` rotates left. Rewrite
    as one rotation per node kind with a direction, which also surfaces the
    real leaf/branch difference in one visible place: leaves *re-derive* the
    separator (clone of the new first key), branches *pass it through*.
 
-8. **Make the two rebalancers textually parallel.** After 6–7,
+8. ~~DONE (3c), as the parallel pair (no abstraction).~~
+   **Make the two rebalancers textually parallel.** After 6–7,
    `rebalance_leaf_child` and `rebalance_branch_child` are the same
    skeleton (under min? → try borrow left → try borrow right → merge).
    Lay them out identically so a reader can diff them by eye. Only abstract
    the skeleton if that stays *more* readable than the parallel pair —
    generics here can cost more than duplication.
 
-9. **Branch shifts mirror leaf shifts.** common.rs gives leaves
+9. ~~DONE (3a/3c).~~ `branch_open_gap`/`branch_close_gap` serve
+   `branch_apply_split` and `remove_branch_entry`; the front-of-node
+   rotations keep mirrored inline copies (their gap is at the child-aligned
+   slot 0, a genuinely different shape). Fixed in passing: the old entry
+   removal copied one child too many and papered over it with a null store.
+   **Branch shifts mirror leaf shifts.** common.rs gives leaves
    `shift_right` / `shift_left_kv`; branch code hand-rolls `ptr::copy` in
    both directions. Add the branch pair (keys + children together) and use
    it in `branch_apply_split` and `remove_branch_entry`, which then read as
    the mirrors they are.
 
-10. **One bulk-move helper for split and merge.** Splits move slots with
+10. ~~DONE (3a/3c): `move_kv_range`.~~
+    **One bulk-move helper for split and merge.** Splits move slots with
     `copy_nonoverlapping`; `merge_leaf_into` moves them one read/write pair
     at a time. Use the same bulk helper in both directions — the inverse
     relationship becomes visible, and the merge loop gets faster for free.
 
-11. **Turn "should not happen" into stated invariants.** The merge-overflow
+11. ~~DONE (3a) for the merge-overflow panics; `check_root_collapse`'s
+    null tolerance kept and now documented at the rebalancers.~~
+    **Turn "should not happen" into stated invariants.** The merge-overflow
     panics and similar defensive checks blur which states are possible.
     Where the invariant checker (run by the fuzzer after every mutation)
     already forbids the state, use `debug_assert!` with the invariant named.
