@@ -136,144 +136,61 @@ impl<K: Ord + Clone, V> BPlusTreeMap<K, V> {
     ) -> InsertResult<K, V> {
         let b = layout::carve_branch::<K>(node, &self.branch_layout);
         let len = (*b.hdr).len as usize;
-        let total_keys = len + 1;
-        let pm = total_keys / 2; // number of keys that remain on the left after split
+        let keys = b.keys_ptr as *mut K;
+        let children = b.children_ptr as *mut *mut u8;
 
-        // Allocate the new right branch
         let right_node = alloc_branch_block(&self.branch_layout).expect("alloc right branch");
         let rb = layout::carve_branch::<K>(right_node, &self.branch_layout);
+        let r_keys = rb.keys_ptr as *mut K;
+        let r_children = rb.children_ptr as *mut *mut u8;
 
-        let cbase_src = b.children_ptr as *const *mut u8;
-        let cbase_dst = rb.children_ptr as *mut *mut u8;
-
-        if insert_idx < pm {
-            // Promote original key at pm-1
-            let promote = core::ptr::read((b.keys_ptr as *const K).add(pm - 1));
-
-            // Move keys [pm .. len) to right; left hdr.len excludes them
-            let keys_move = len - pm;
-            if keys_move > 0 {
-                core::ptr::copy_nonoverlapping(
-                    (b.keys_ptr as *const K).add(pm),
-                    rb.keys_ptr as *mut K,
-                    keys_move,
-                );
-            }
-            (*rb.hdr).len = keys_move as u16;
-
-            // Move children [pm .. len] to right; left hdr.len excludes them
-            let cnt = (len + 1) - pm;
-            core::ptr::copy_nonoverlapping(cbase_src.add(pm), cbase_dst, cnt);
-
-            // Insert ins_key into left at insert_idx; shift keys and children
-            let left_keep = pm - 1;
-            let to_shift = left_keep.saturating_sub(insert_idx);
-            if to_shift > 0 {
-                core::ptr::copy(
-                    (b.keys_ptr as *mut K).add(insert_idx),
-                    (b.keys_ptr as *mut K).add(insert_idx + 1),
-                    to_shift,
-                );
-            }
-            self.write_key_at(b.keys_ptr as *mut K, insert_idx, ins_key);
-            (*b.hdr).len = pm as u16;
-
-            let cbase_mut = b.children_ptr as *mut *mut u8;
-            let to_shift_c = (left_keep + 1).saturating_sub(insert_idx + 1);
-            if to_shift_c > 0 {
-                core::ptr::copy(
-                    cbase_mut.add(insert_idx + 1),
-                    cbase_mut.add(insert_idx + 2),
-                    to_shift_c,
-                );
-            }
-            *cbase_mut.add(insert_idx + 1) = ins_right.as_ptr();
-
-            InsertResult::Split {
-                sep_key: promote,
-                right: right_node,
-                old_value,
-            }
-        } else if insert_idx == pm {
-            // Promote the inserted key; do not store it in either child
-            let promote = ins_key;
-
-            // Move keys [pm .. len) to right; left hdr.len excludes them
-            let keys_move = len - pm;
-            if keys_move > 0 {
-                core::ptr::copy_nonoverlapping(
-                    (b.keys_ptr as *const K).add(pm),
-                    rb.keys_ptr as *mut K,
-                    keys_move,
-                );
-            }
-            (*rb.hdr).len = keys_move as u16;
-
-            // Right children: first is ins_right, then originals [pm+1 .. len]
-            *cbase_dst.add(0) = ins_right.as_ptr();
-            let cnt = len - pm;
-            if cnt > 0 {
-                core::ptr::copy_nonoverlapping(cbase_src.add(pm + 1), cbase_dst.add(1), cnt);
-            }
-
-            (*b.hdr).len = pm as u16;
-            InsertResult::Split {
-                sep_key: promote,
-                right: right_node,
-                old_value,
-            }
+        // View the branch as child_0 plus (key, child-after) entries; the
+        // entry view makes this one case, shaped like leaf_insert_or_split:
+        // move the tail entries out, insert into whichever side the new
+        // entry sorts into, then promote the boundary. `left_count` is the
+        // final left size; promoting the boundary makes the sides balance.
+        let left_count = (len + 1) / 2;
+        let left_keep = if insert_idx < left_count {
+            left_count - 1
         } else {
-            // insert_idx > pm
-            // Promote original key at pm
-            let promote = core::ptr::read((b.keys_ptr as *const K).add(pm));
+            left_count
+        };
 
-            // Move keys [pm+1 .. len) to right; left hdr.len excludes them
-            let keys_move = len.saturating_sub(pm + 1);
-            if keys_move > 0 {
-                core::ptr::copy_nonoverlapping(
-                    (b.keys_ptr as *const K).add(pm + 1),
-                    rb.keys_ptr as *mut K,
-                    keys_move,
-                );
-            }
-            (*rb.hdr).len = keys_move as u16;
+        // Move entries [left_keep..len) to the right node: keys to [0..),
+        // each entry's child to [1..) (slot 0 is filled by the promotion).
+        let move_count = len - left_keep;
+        core::ptr::copy_nonoverlapping(keys.add(left_keep), r_keys, move_count);
+        core::ptr::copy_nonoverlapping(children.add(left_keep + 1), r_children.add(1), move_count);
+        (*b.hdr).len = left_keep as u16;
+        (*rb.hdr).len = move_count as u16;
 
-            // Children to right: chunk1 [pm+1 .. insert_idx], then ins_right, then chunk2 [insert_idx+1 .. len]
-            let first_count = insert_idx - pm;
-            if first_count > 0 {
-                core::ptr::copy_nonoverlapping(cbase_src.add(pm + 1), cbase_dst, first_count);
-            }
-            *cbase_dst.add(first_count) = ins_right.as_ptr();
-            let second_count = len - insert_idx;
-            if second_count > 0 {
-                core::ptr::copy_nonoverlapping(
-                    cbase_src.add(insert_idx + 1),
-                    cbase_dst.add(first_count + 1),
-                    second_count,
-                );
-            }
+        // Insert the new entry into whichever side it sorts into.
+        if insert_idx < left_count {
+            self.branch_open_gap(keys, children, insert_idx, left_keep);
+            self.write_key_at(keys, insert_idx, ins_key);
+            *children.add(insert_idx + 1) = ins_right.as_ptr();
+            (*b.hdr).len = (left_keep + 1) as u16;
+        } else {
+            let r_idx = insert_idx - left_keep;
+            self.branch_open_gap(r_keys, r_children, r_idx, move_count);
+            self.write_key_at(r_keys, r_idx, ins_key);
+            *r_children.add(r_idx + 1) = ins_right.as_ptr();
+            (*rb.hdr).len = (move_count + 1) as u16;
+        }
 
-            // Insert ins_key into right at position relative to right start
-            let right_insert = insert_idx - (pm + 1);
-            let rkeys = rb.keys_ptr as *mut K;
-            let current_right_len = (*rb.hdr).len as usize;
-            let to_shift = current_right_len.saturating_sub(right_insert);
-            if to_shift > 0 {
-                core::ptr::copy(
-                    rkeys.add(right_insert),
-                    rkeys.add(right_insert + 1),
-                    to_shift,
-                );
-            }
-            self.write_key_at(rkeys, right_insert, ins_key);
-            (*rb.hdr).len = (current_right_len + 1) as u16;
-            (*b.hdr).len = pm as u16;
+        // Promote the boundary: the right node's first entry's key goes up,
+        // and its child becomes the right node's leftmost child (the same
+        // close-slot-0 move as rotate_branch_left's pop).
+        let r_len = (*rb.hdr).len as usize;
+        let sep_key = core::ptr::read(r_keys);
+        core::ptr::copy(r_keys.add(1), r_keys, r_len - 1);
+        core::ptr::copy(r_children.add(1), r_children, r_len);
+        (*rb.hdr).len = (r_len - 1) as u16;
 
-            InsertResult::Split {
-                sep_key: promote,
-                right: right_node,
-                old_value,
-            }
+        InsertResult::Split {
+            sep_key,
+            right: right_node,
+            old_value,
         }
     }
 
