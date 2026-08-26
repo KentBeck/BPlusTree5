@@ -16,6 +16,9 @@ pub(crate) enum InsertResult<K, V> {
 
 impl<K: Ord + Clone, V> BPlusTreeMap<K, V> {
     pub fn insert(&mut self, key: K, value: V) -> Option<V> {
+        // 64 levels is unreachable for any branch fanout >= 2.
+        const MAX_DEPTH: usize = 64;
+
         let root = match self.root {
             Some(p) => p,
             None => unsafe { alloc_leaf_block(&self.leaf_layout).expect("alloc leaf") },
@@ -23,15 +26,55 @@ impl<K: Ord + Clone, V> BPlusTreeMap<K, V> {
         if self.root.is_none() {
             self.root = Some(root);
         }
-        let res = unsafe { self.insert_rec(root, key, value) };
-        match res {
-            InsertResult::NoSplit(old) => old,
-            InsertResult::Split {
-                sep_key,
-                right,
-                old_value,
-            } => {
-                unsafe {
+
+        unsafe {
+            // Iterative descent, recording (branch, child_idx) for the way up.
+            let mut path: [core::mem::MaybeUninit<(NonNull<u8>, usize)>; MAX_DEPTH] =
+                [core::mem::MaybeUninit::uninit(); MAX_DEPTH];
+            let mut depth = 0usize;
+            let mut node = root;
+            loop {
+                let hdr = &*(node.as_ptr() as *const NodeHdr);
+                match hdr.tag {
+                    NodeTag::Leaf => break,
+                    NodeTag::Branch => {
+                        let (child, child_idx) =
+                            self.child_for_key(node, &key).expect("child must exist");
+                        debug_assert!(depth < MAX_DEPTH);
+                        path[depth].write((node, child_idx));
+                        depth += 1;
+                        node = child;
+                    }
+                }
+            }
+
+            let mut res = self.leaf_insert_or_split(node, key, value);
+
+            // Apply split fixups bottom-up; stop as soon as a level absorbs it.
+            while depth > 0 {
+                match res {
+                    InsertResult::NoSplit(old) => return old,
+                    InsertResult::Split {
+                        sep_key,
+                        right,
+                        old_value,
+                    } => {
+                        depth -= 1;
+                        let (branch, child_idx) = path[depth].assume_init();
+                        res = self.branch_apply_split(branch, child_idx, sep_key, right, old_value);
+                    }
+                }
+            }
+
+            match res {
+                InsertResult::NoSplit(old) => old,
+                InsertResult::Split {
+                    sep_key,
+                    right,
+                    old_value,
+                } => {
+                    // The root itself split: grow the tree by one level.
+                    let old_root = self.root.expect("root exists");
                     let branch =
                         alloc_branch_block(&self.branch_layout).expect("alloc new root branch");
                     let b = layout::carve_branch::<K>(branch, &self.branch_layout);
@@ -40,11 +83,11 @@ impl<K: Ord + Clone, V> BPlusTreeMap<K, V> {
                     self.write_key_at(b.keys_ptr as *mut K, 0, sep_key);
                     let c0 = b.children_ptr as *mut *mut u8;
                     let c1 = c0.add(1);
-                    *c0 = root.as_ptr();
+                    *c0 = old_root.as_ptr();
                     *c1 = right.as_ptr();
                     self.root = Some(branch);
+                    old_value
                 }
-                old_value
             }
         }
     }
@@ -57,44 +100,37 @@ impl<K: Ord + Clone, V> BPlusTreeMap<K, V> {
         Ok(old_vals)
     }
 
-    unsafe fn insert_rec(&mut self, node: NonNull<u8>, key: K, value: V) -> InsertResult<K, V> {
-        let hdr = &*(node.as_ptr() as *const NodeHdr);
-        match hdr.tag {
-            NodeTag::Leaf => self.leaf_insert_or_split(node, key, value),
-            NodeTag::Branch => {
-                let (child, child_idx) = self.child_for_key(node, &key).expect("child must exist");
-                match self.insert_rec(child, key, value) {
-                    InsertResult::NoSplit(old) => InsertResult::NoSplit(old),
-                    InsertResult::Split {
-                        sep_key,
-                        right,
-                        old_value,
-                    } => {
-                        let b = layout::carve_branch::<K>(node, &self.branch_layout);
-                        let cur_len = (*b.hdr).len as usize;
-                        let cap = self.branch_layout.cap as usize;
-                        if cur_len < cap {
-                            core::ptr::copy(
-                                b.keys_ptr.add(child_idx) as *mut K,
-                                b.keys_ptr.add(child_idx + 1) as *mut K,
-                                cur_len - child_idx,
-                            );
-                            self.write_key_at(b.keys_ptr as *mut K, child_idx, sep_key);
-                            let cbase = b.children_ptr as *mut *mut u8;
-                            core::ptr::copy(
-                                cbase.add(child_idx + 1),
-                                cbase.add(child_idx + 2),
-                                cur_len - child_idx,
-                            );
-                            *cbase.add(child_idx + 1) = right.as_ptr();
-                            (*b.hdr).len = (cur_len + 1) as u16;
-                            InsertResult::NoSplit(old_value)
-                        } else {
-                            self.branch_insert_and_split(node, child_idx, sep_key, right, old_value)
-                        }
-                    }
-                }
-            }
+    /// Absorb a child split into `node` at `child_idx`: insert the separator
+    /// and right-sibling pointer, splitting this branch too if it is full.
+    unsafe fn branch_apply_split(
+        &mut self,
+        node: NonNull<u8>,
+        child_idx: usize,
+        sep_key: K,
+        right: NonNull<u8>,
+        old_value: Option<V>,
+    ) -> InsertResult<K, V> {
+        let b = layout::carve_branch::<K>(node, &self.branch_layout);
+        let cur_len = (*b.hdr).len as usize;
+        let cap = self.branch_layout.cap as usize;
+        if cur_len < cap {
+            core::ptr::copy(
+                b.keys_ptr.add(child_idx) as *mut K,
+                b.keys_ptr.add(child_idx + 1) as *mut K,
+                cur_len - child_idx,
+            );
+            self.write_key_at(b.keys_ptr as *mut K, child_idx, sep_key);
+            let cbase = b.children_ptr as *mut *mut u8;
+            core::ptr::copy(
+                cbase.add(child_idx + 1),
+                cbase.add(child_idx + 2),
+                cur_len - child_idx,
+            );
+            *cbase.add(child_idx + 1) = right.as_ptr();
+            (*b.hdr).len = (cur_len + 1) as u16;
+            InsertResult::NoSplit(old_value)
+        } else {
+            self.branch_insert_and_split(node, child_idx, sep_key, right, old_value)
         }
     }
 

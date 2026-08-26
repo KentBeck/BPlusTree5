@@ -37,7 +37,9 @@ One change per commit, with before/after numbers in the commit message.
 (std's own numbers swing that much between runs). Never compare numbers from
 separate runs. To claim a win, build the before and after binaries side by
 side (`git worktree add` the parent commit) and interleave several rounds of
-both; the effect must clear the interleaved spread.
+both; the effect must clear the interleaved spread. For effects below the
+noise floor, `valgrind --tool=cachegrind --cache-sim=yes` gives deterministic
+instruction and cache-miss counts (see `examples/insert_only.rs`).
 
 ## Where we stand today (cap=128, 1M items)
 
@@ -135,18 +137,26 @@ a. ~~**Stop zeroing vacated slots on split paths.**~~ — DONE, but
    depends on zeroed slots. Splits are simply too rare (~1 per cap/2
    inserts) for their memsets to matter.
 
-b. **Iterative descent with cached carve.** `insert_rec` (`insert.rs:60`)
-   recurses and re-carves the branch on the way back up for split fixups.
-   Convert to an iterative descent recording `(node, child_idx)` in a small
-   fixed array (depth ≤ 4–5 at cap≥64 for any realistic n), then apply split
-   fixups bottom-up. Removes call overhead and keeps layouts in registers.
+b. ~~**Iterative descent.**~~ — DONE. `insert()` now descends iteratively,
+   recording `(branch, child_idx)` and applying split fixups bottom-up via
+   `branch_apply_split`; `insert_rec` is gone. Cachegrind (deterministic):
+   13.6% fewer instructions (88.8M → 76.6M for 200k inserts), D1/LL misses
+   identical. Wall-clock neutral on this machine because the workload is
+   memory-bound (~17 D1 misses per insert, unchanged); the instruction win
+   is real but hidden behind stalls. Bonus: no unbounded recursion.
 
-c. **Branchless intra-node binary search.** `binary_search_keys`
-   (`common.rs:70`) is `slice::binary_search`, which carries bounds checks and
-   unpredictable branches. At cap=128 it runs 7 iterations per level. Replace
-   with a branchless (conditional-move) search over the raw key array,
-   optionally with a one-step prefetch of the child line. This hook serves
-   every operation — re-verify get (currently 1.9× ahead) doesn't regress.
+   **Key diagnosis from the cache simulation: random insert is D1-miss
+   bound, not instruction bound.** Instruction-shaving alone won't move
+   wall time; reducing misses per operation is the lever.
+
+c. **Branchless intra-node binary search + child prefetch.**
+   `binary_search_keys` (`common.rs:70`) is `slice::binary_search`. Per the
+   diagnosis in 4b, the branchless-cmov half of this item is demoted (it
+   shaves instructions, not misses). The promising half is the memory side:
+   a search that prefetches the child line mid-descent, or a two-level
+   layout that touches fewer key cache lines per node (e.g. a first-line
+   "router" of evenly spaced keys). Measure with cachegrind miss counts
+   first, wall clock second.
 
 ### 5. Decoupled leaf/branch capacities (within the large-cap regime)
 
