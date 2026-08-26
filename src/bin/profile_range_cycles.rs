@@ -73,7 +73,7 @@ fn main() {
     }
 
     // Measure just the iteration loop (skip first element)
-    let _iter_cycles = 0u64;
+    let mut _iter_cycles = 0u64;
     for _ in 0..iterations {
         let mut iter = map.range(start..end);
         iter.next(); // Skip first

@@ -216,7 +216,6 @@ fn test_clear_and_reuse_with_drop_tracking() {
 }
 
 #[test]
-#[ignore] // TODO: Fix double-free issue in complex remove scenarios with rebalancing
 fn test_drop_after_removes() {
     let counter = Arc::new(AtomicUsize::new(0));
 
@@ -422,7 +421,6 @@ fn test_minimal_clear() {
 }
 
 #[test]
-#[ignore] // TODO: Fix double-free issue when removing item 13 after 10,11,12
 fn test_simple_remove() {
     let counter = Arc::new(AtomicUsize::new(0));
     let mut tree: BPlusTreeMap<DropCounter, DropCounter> = BPlusTreeMap::new(5).unwrap();
