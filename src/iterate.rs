@@ -367,11 +367,33 @@ impl<K: Ord + Clone, V> BPlusTreeMap<K, V> {
     }
 
     pub fn first(&self) -> Option<(&K, &V)> {
-        self.items().next()
+        let leaf = self.leftmost_leaf()?;
+        unsafe {
+            let parts = layout::carve_leaf::<K, V>(leaf, &self.leaf_layout);
+            if (*parts.hdr).len == 0 {
+                return None;
+            }
+            Some((
+                &*(parts.keys_ptr as *const K),
+                &*(parts.vals_ptr as *const V),
+            ))
+        }
     }
 
     pub fn last(&self) -> Option<(&K, &V)> {
-        self.items().last()
+        let leaf = self.rightmost_leaf()?;
+        unsafe {
+            let parts = layout::carve_leaf::<K, V>(leaf, &self.leaf_layout);
+            let len = (*parts.hdr).len as usize;
+            // Only a root leaf can be empty; non-root leaves hold >= min_leaf_len.
+            if len == 0 {
+                return None;
+            }
+            Some((
+                &*(parts.keys_ptr.add(len - 1) as *const K),
+                &*(parts.vals_ptr.add(len - 1) as *const V),
+            ))
+        }
     }
 
     pub(crate) fn collect_range_bounds<'a>(

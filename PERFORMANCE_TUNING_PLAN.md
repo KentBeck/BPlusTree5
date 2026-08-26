@@ -50,7 +50,6 @@ Losses:
 
 | Operation                              | vs std::BTreeMap                 |
 |----------------------------------------|----------------------------------|
-| `first()` / `last()` (1M items)        | ~400,000× slower (39s / 10k calls) |
 | `len()` / `is_empty()` (1M items)      | O(n) vs O(1) (~0.4 ms per call)  |
 | random insert                          | 1.16× slower (bench_insert keys) to 1.6× slower (hash-scattered probe keys) |
 | range scan, 100–10k items              | 1.6–2.1× slower                  |
@@ -64,25 +63,28 @@ get/iteration prefer the larger nodes. That tension motivates item 5.
 
 ## P0 — asymptotic bugs (large wins, low risk)
 
-### 1. Cache the length: make `len()` / `is_empty()` O(1)
+### 1. `len()` / `is_empty()` are O(n) — decision pending
 
-`lib.rs:209` computes `len()` by walking the entire leaf linked list. Add a
-`len: usize` field to `BPlusTreeMap`, maintained in `insert` (+1 on new key),
-`remove` (−1 on hit), `clear`/`Drop` (reset). `items()` (`iterate.rs:275`)
-already calls `len()`, so every full-iterator construction currently pays an
-O(n) walk before yielding the first element — this fix also repairs that.
+`lib.rs:209` computes `len()` by walking the entire leaf linked list
+(~0.4 ms at 1M items; every other mainstream map is O(1)). The obvious fix —
+a cached `len: usize` maintained by insert/remove/clear and cross-checked by
+`check_invariants_detailed` so the fuzzer validates it on every mutation — is
+one the author is reluctant to take on (a denormalization plus a maintenance
+obligation in every mutation path).
 
-Verification: add a check to `check_invariants_detailed` that the cached value
-equals the walked total, so the fuzz suite validates the counter on every
-mutation for free.
+The cost profile if it stays O(n): any caller that consults `len()` or
+`is_empty()` per operation (capacity-eviction guards, drain-until-empty
+loops, per-tick metrics) goes quadratic. Independent of that decision, do the
+cheap decoupling: `items()` (`iterate.rs:275`) calls `len()` only to seed
+`size_hint`, so today every full-iterator construction pays an O(n) walk
+before the first element — make the iterator track position lazily instead,
+and document `len()` as O(n) if it stays that way.
 
-### 2. `first()` and `last()` in O(log n)
+### 2. ~~`first()` and `last()` in O(log n)~~ — DONE
 
-`iterate.rs:369-375`: `first()` builds a full `items()` iterator (O(n) via
-`len()`), and `last()` consumes an entire iterator with `.last()` — O(n) even
-after fix 1. Replace with direct reads: `leftmost_leaf()` → element 0;
-`rightmost_leaf()` → element `len-1`. Both helpers already exist in
-`common.rs`. Measured today: 10k first/last pairs take 39s vs std's 0.1ms.
+Fixed: `first()`/`last()` now read directly from the leftmost/rightmost leaf
+instead of building/consuming a full `items()` iterator. Measured: 10k
+first/last pairs went from 39s to 0.1ms — parity with std.
 
 ## P1 — the real per-op gaps
 
@@ -166,8 +168,8 @@ worse than the tree actually is). Any future benchmark must use cap ≥ 64.
 
 ## Sequencing
 
-1. Items 1–2 first: trivial, huge, and they de-noise every later benchmark
-   (any bench touching `len()`/`items()` currently measures the O(n) walk).
+1. Item 1's decoupling first (item 2 is done): de-noises any benchmark that
+   constructs full iterators, which currently pay the O(n) `len()` walk.
 2. Item 3 against the range/cursor probes in `perf_probe`.
 3. Items 4a–4c as separate commits against the random-insert sweep.
 4. Items 5–6 next if insert is still behind; 7–8 as cleanups.
