@@ -134,9 +134,17 @@ fuzz+Miri gate with bench_delete unchanged. Notes against the plan:
     itself mid-pass — that tolerance is load-bearing; document it rather
     than "simplify" it away.
 
-## Phase 4 — insert.rs and layout.rs (riskiest last)
+## Phase 4 — insert.rs and layout.rs (riskiest last) — DONE
 
-12. **Collapse `branch_insert_and_split`'s three-way case analysis.** The
+Landed as two commits (4a layout, 4b branch split). Notes against the plan:
+
+12. ~~DONE (4b).~~ The unifying idea turned out to be the *entry view*
+    (a branch is child_0 plus (key, child-after) pairs): split the
+    entries like a leaf, insert into the roomy side, then promote the
+    boundary entry with the same close-slot-0 move as
+    rotate_branch_left. Proven behavior-identical, not just fuzz-clean:
+    structural fingerprints against the old binary match exactly.
+    **Collapse `branch_insert_and_split`'s three-way case analysis.** The
     leaf split absorbs insert-position-vs-split-point into one `left_keep`
     adjustment; the branch split hand-rolls three arms of distinct index
     arithmetic (~120 lines). Reshape it the same way: split at a fixed
@@ -145,15 +153,19 @@ fuzz+Miri gate with bench_delete unchanged. Notes against the plan:
     min-fill invariant, so the fuzzer fully checks the rewrite. Do this
     step last, with the extended fuzz.
 
-13. **Derive `compute` from `compute_for_cap`.** In layout.rs each node
+13. ~~DONE (4a). Equivalence checked exhaustively: 43k computations
+    across type shapes and budgets, identical except unreachable cap-0
+    offsets.~~ **Derive `compute` from `compute_for_cap`.** In layout.rs each node
     kind states the same layout arithmetic twice; `compute` is "the largest
     cap whose `compute_for_cap` fits the byte budget" — write it that way
     and half the file goes away.
 
-## Order and expected shape
+## Outcome
 
-Phases 1–2 are renames and moves: an afternoon, near-zero risk, and they
-make Phase 3 reviewable. Phase 3 is the payoff: delete.rs drops from ~708
-lines of eight look-alike functions to roughly 500 lines of paired,
-named inverses. Phase 4 item 12 is the only genuinely delicate rewrite —
-it goes last, alone in its commit, behind the extended fuzz.
+All four phases are landed. Net shape: delete.rs 708 → 534 lines,
+insert.rs 430 → 333, layout.rs 346 → 242, and every remaining unsafe
+move sits next to its inverse (alloc/free, link/unlink, open/close gap,
+split/merge, rotate left/right) with its ownership contract in the type
+or a checked assert rather than prose. Every step passed the full
+suite + extended differential fuzz + Miri gate before landing, and the
+delete/insert benchmarks are unchanged within the noise floor.
