@@ -48,26 +48,6 @@ One step per commit. After the delete.rs steps, re-run `perf_probe` and
    only exercise each other. Deleting both is a defensible follow-up, but
    it removes a test, so it is left as an explicit call for the author.
 
-### Original notes
-
-1. **Fix the inverted free names.** `free_tree_no_drop` (lib.rs) *does* drop
-   every key and value; `free_leaf_node` (delete.rs) does *not* and carries
-   an 8-line comment explaining why. Rename to what they do:
-   `free_tree_no_drop` → `drop_subtree`; `free_leaf_node` →
-   `free_emptied_leaf` (and make "emptied" a checked precondition:
-   `debug_assert_eq!(len, 0)` instead of the comment). `free_branch_node`
-   drops separators only on the root-collapse path — move that drop to the
-   one caller that needs it so the free functions share one contract:
-   *contents already gone, node is just memory*.
-
-2. **Delete or repair the lying stubs.** `validate()` returns `Ok(())`
-   unconditionally — wire it to `check_invariants_detailed()` (its only test
-   user is tests/bplus_tree.rs) or delete it. Grep-and-prune the arena-era
-   compat surface that no longer describes this design: `NodeRef`,
-   `NULL_NODE`, `id()/is_leaf()`, arena-stat stubs — keep only what the
-   imported test suite actually calls. Update lib.rs's stale "temporary
-   shims" module comment to say what the compat layer is *now*.
-
 ## Phase 2 — pair the inverses across files
 
 3. **Alloc beside free.** node_alloc.rs holds `alloc_leaf_block` /
