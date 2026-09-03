@@ -4,15 +4,7 @@
 #[cfg(target_arch = "x86_64")]
 use bplustree::BPlusTreeMap;
 #[cfg(target_arch = "x86_64")]
-use std::arch::x86_64::_rdtsc;
-#[cfg(target_arch = "x86_64")]
 use std::hint::black_box;
-
-#[cfg(target_arch = "x86_64")]
-#[inline(always)]
-unsafe fn rdtsc() -> u64 {
-    _rdtsc()
-}
 
 #[cfg(target_arch = "x86_64")]
 struct CycleStats {

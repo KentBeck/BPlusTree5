@@ -71,10 +71,6 @@ fn test_error_message_formatting() {
         BPlusTreeError::KeyNotFound,
         BPlusTreeError::InvalidCapacity("capacity too small".to_string()),
         BPlusTreeError::DataIntegrityError("corruption detected".to_string()),
-        BPlusTreeError::ArenaError("allocation failed".to_string()),
-        BPlusTreeError::NodeError("node not found".to_string()),
-        BPlusTreeError::CorruptedTree("tree structure invalid".to_string()),
-        BPlusTreeError::InvalidState("invalid operation".to_string()),
         BPlusTreeError::AllocationError("out of memory".to_string()),
     ];
 

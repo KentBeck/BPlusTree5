@@ -20,7 +20,6 @@ pub enum NodeTag {
 pub struct NodeHdr {
     pub tag: NodeTag, // 1 byte
     pub len: u16,     // number of initialized keys in this node
-    pub flags: u8,    // reserved
 }
 
 #[derive(Copy, Clone, Debug)]
@@ -28,7 +27,6 @@ pub struct LeafLayout {
     pub bytes: usize,
     pub cap: u16,
     pub max_align: usize,
-    pub hdr_size: usize,
     // sibling pointers
     pub next_off: usize,
     pub prev_off: Option<usize>,
@@ -42,32 +40,11 @@ pub struct BranchLayout {
     pub bytes: usize,
     pub cap: u16,
     pub max_align: usize,
-    pub hdr_size: usize,
     pub children_off: usize, // [*mut NodeHdr; cap+1]
     pub keys_off: usize,     // [K; cap]
 }
 
 impl LeafLayout {
-    /// The layout with the largest capacity whose tight size
-    /// (`compute_for_cap`) fits in `bytes`; the block size stays the full
-    /// budget. If `doubly_linked` is true, include space for both next and
-    /// prev pointers.
-    pub fn compute<K, V>(bytes: usize, doubly_linked: bool) -> Self {
-        let per_entry = size_of::<K>() + size_of::<V>();
-        let mut cap = if per_entry == 0 {
-            u16::MAX as usize
-        } else {
-            (bytes / per_entry).min(u16::MAX as usize)
-        };
-        loop {
-            let layout = Self::compute_for_cap::<K, V>(cap as u16, doubly_linked);
-            if layout.bytes <= bytes || cap == 0 {
-                return Self { bytes, ..layout };
-            }
-            cap -= 1;
-        }
-    }
-
     /// Compute a leaf layout targeting an exact capacity (number of key/value pairs).
     pub fn compute_for_cap<K, V>(cap: u16, doubly_linked: bool) -> Self {
         let a_ptr = align_of::<*const ()>();
@@ -107,7 +84,6 @@ impl LeafLayout {
             bytes: end_aligned,
             cap,
             max_align,
-            hdr_size,
             next_off: sib_off,
             prev_off: if doubly_linked {
                 Some(sib_off + s_ptr)
@@ -121,22 +97,6 @@ impl LeafLayout {
 }
 
 impl BranchLayout {
-    /// The layout with the largest capacity whose tight size
-    /// (`compute_for_cap`) fits in `bytes`; the block size stays the full
-    /// budget.
-    pub fn compute<K>(bytes: usize) -> Self {
-        // Pointers are never zero-sized, so per_entry is nonzero.
-        let per_entry = size_of::<K>() + size_of::<*const ()>();
-        let mut cap = (bytes / per_entry).min(u16::MAX as usize);
-        loop {
-            let layout = Self::compute_for_cap::<K>(cap as u16);
-            if layout.bytes <= bytes || cap == 0 {
-                return Self { bytes, ..layout };
-            }
-            cap -= 1;
-        }
-    }
-
     /// Compute a branch layout targeting an exact capacity (number of keys).
     pub fn compute_for_cap<K>(cap: u16) -> Self {
         let a_ptr = align_of::<*const ()>();
@@ -178,7 +138,6 @@ impl BranchLayout {
             bytes: end_aligned,
             cap,
             max_align,
-            hdr_size,
             children_off,
             keys_off,
         }
@@ -198,16 +157,12 @@ pub struct LeafParts<K, V> {
     pub vals_ptr: *mut MaybeUninit<V>,
 }
 
-impl<K, V> LeafParts<K, V> {}
-
 #[derive(Copy, Clone)]
 pub struct BranchParts<K> {
     pub hdr: *mut NodeHdr,
     pub children_ptr: *mut MaybeUninit<*mut u8>,
     pub keys_ptr: *mut MaybeUninit<K>,
 }
-
-impl<K> BranchParts<K> {}
 
 /// Carve a leaf node's header, sibling pointers, and arrays from a raw base pointer.
 #[inline(always)]

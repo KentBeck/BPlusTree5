@@ -56,7 +56,6 @@ pub unsafe fn init_leaf_block(base: NonNull<u8>, layout: &LeafLayout) {
         NodeHdr {
             tag: NodeTag::Leaf,
             len: 0,
-            flags: 0,
         },
     );
 
@@ -92,7 +91,6 @@ pub unsafe fn init_branch_block(base: NonNull<u8>) {
         NodeHdr {
             tag: NodeTag::Branch,
             len: 0,
-            flags: 0,
         },
     );
 }

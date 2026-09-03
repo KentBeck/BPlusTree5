@@ -46,30 +46,6 @@ impl<K, V> Drop for BPlusTreeMap<K, V> {
 }
 
 impl<K, V> BPlusTreeMap<K, V> {
-    /// Common cache line size assumption (bytes).
-    pub const CACHE_LINE_BYTES: usize = 64;
-
-    /// Construct with explicit byte budgets for leaves and branches.
-    /// Doubly-linked leaves are used to support reverse iteration efficiently.
-    pub fn with_budgets(leaf_bytes: usize, branch_bytes: usize) -> Self {
-        let leaf_layout = LeafLayout::compute::<K, V>(leaf_bytes, true);
-        let branch_layout = BranchLayout::compute::<K>(branch_bytes);
-        Self {
-            root: None,
-            leaf_layout,
-            branch_layout,
-            _marker: PhantomData,
-        }
-    }
-
-    /// Construct using cache-line counts for leaf and branch nodes.
-    /// Uses 64-byte cache lines by default.
-    pub fn with_cache_lines(leaf_lines: usize, branch_lines: usize) -> Self {
-        let lb = leaf_lines.saturating_mul(Self::CACHE_LINE_BYTES);
-        let bb = branch_lines.saturating_mul(Self::CACHE_LINE_BYTES);
-        Self::with_budgets(lb, bb)
-    }
-
     /// Returns the configured layout for leaf nodes.
     pub fn leaf_layout(&self) -> &LeafLayout {
         &self.leaf_layout
@@ -138,10 +114,6 @@ pub enum BPlusTreeError {
     InvalidCapacity(String),
     KeyNotFound,
     DataIntegrityError(String),
-    ArenaError(String),
-    NodeError(String),
-    CorruptedTree(String),
-    InvalidState(String),
     AllocationError(String),
 }
 
@@ -151,10 +123,6 @@ impl fmt::Display for BPlusTreeError {
             BPlusTreeError::InvalidCapacity(s) => write!(f, "InvalidCapacity: {}", s),
             BPlusTreeError::KeyNotFound => write!(f, "Key not found"),
             BPlusTreeError::DataIntegrityError(s) => write!(f, "DataIntegrityError: {}", s),
-            BPlusTreeError::ArenaError(s) => write!(f, "ArenaError: {}", s),
-            BPlusTreeError::NodeError(s) => write!(f, "NodeError: {}", s),
-            BPlusTreeError::CorruptedTree(s) => write!(f, "CorruptedTree: {}", s),
-            BPlusTreeError::InvalidState(s) => write!(f, "InvalidState: {}", s),
             BPlusTreeError::AllocationError(s) => write!(f, "AllocationError: {}", s),
         }
     }
@@ -237,49 +205,6 @@ impl<K: Ord + Clone, V> BPlusTreeMap<K, V> {
     }
 }
 
-// ===============
-// Macros used in tests
-// ===============
-#[macro_export]
-#[cfg(feature = "compat_test_api")]
-macro_rules! assert_tree_valid {
-    ($tree:expr) => {{ if let Err(e) = $tree.check_invariants_detailed() { panic!("Tree invariants violated: {}", e); } }};
-    ($tree:expr, $context:expr) => {{ if let Err(e) = $tree.check_invariants_detailed() { panic!("ATTACK SUCCESSFUL in {}: {}", $context, e); } }};
-    ($tree:expr, $context:expr, $cycle:expr) => {{ if let Err(e) = $tree.check_invariants_detailed() { panic!("ATTACK SUCCESSFUL at {} cycle {}: {}", $context, $cycle, e); } }};
-    ($tree:expr, $fmt:expr, $($arg:tt)*) => {{ if let Err(e) = $tree.check_invariants_detailed() { panic!("ATTACK SUCCESSFUL: {} - {}", format!($fmt, $($arg)*), e); } }};
-}
-
-#[macro_export]
-#[cfg(feature = "compat_test_api")]
-macro_rules! verify_attack_result {
-    ($tree:expr, $context:expr) => {
-        assert_tree_valid!($tree, $context);
-    };
-    ($tree:expr, $context:expr, ordering) => {{
-        assert_tree_valid!($tree, $context);
-        let items: std::vec::Vec<_> = $tree.items().collect();
-        for i in 1..items.len() {
-            if items[i - 1].0 >= items[i].0 {
-                panic!("ATTACK SUCCESSFUL: Items out of order in {}!", $context);
-            }
-        }
-    }};
-    ($tree:expr, $context:expr, count = $expected:expr) => {{
-        assert_tree_valid!($tree, $context);
-        let actual = $tree.len();
-        if actual != $expected {
-            panic!(
-                "ATTACK SUCCESSFUL in {}: Expected {} items, got {}",
-                $context, $expected, actual
-            );
-        }
-    }};
-    ($tree:expr, $context:expr, full = $expected:expr) => {{
-        verify_attack_result!($tree, $context, count = $expected);
-        verify_attack_result!($tree, $context, ordering);
-    }};
-}
-
 // =============================
 // Enhanced error/result compatibility layer (stubs)
 // =============================
@@ -323,18 +248,6 @@ impl BPlusTreeError {
     }
     pub fn data_integrity(op: &str, why: &str) -> Self {
         BPlusTreeError::DataIntegrityError(format!("{}: {}", op, why))
-    }
-    pub fn arena_error(what: &str, why: &str) -> Self {
-        BPlusTreeError::ArenaError(format!("{} failed: {}", what, why))
-    }
-    pub fn node_error(kind: &str, id: u32, why: &str) -> Self {
-        BPlusTreeError::NodeError(format!("{} node {}: {}", kind, id, why))
-    }
-    pub fn corrupted_tree(where_: &str, why: &str) -> Self {
-        BPlusTreeError::CorruptedTree(format!("{} corruption: {}", where_, why))
-    }
-    pub fn invalid_state(op: &str, why: &str) -> Self {
-        BPlusTreeError::InvalidState(format!("Cannot {}: {}", op, why))
     }
     pub fn allocation_error(what: &str, why: &str) -> Self {
         BPlusTreeError::AllocationError(format!("Failed to allocate {}: {}", what, why))

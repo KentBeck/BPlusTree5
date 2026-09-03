@@ -28,26 +28,6 @@ fn test_enhanced_error_constructors() {
     assert!(error.to_string().contains("Split operation"));
     assert!(error.to_string().contains("Key collision detected"));
 
-    // Test ArenaError with context
-    let error = BPlusTreeError::arena_error("Node allocation", "Out of memory");
-    assert!(error.to_string().contains("Node allocation failed"));
-    assert!(error.to_string().contains("Out of memory"));
-
-    // Test NodeError with context
-    let error = BPlusTreeError::node_error("Leaf", 42, "Corruption detected");
-    assert!(error.to_string().contains("Leaf node 42"));
-    assert!(error.to_string().contains("Corruption detected"));
-
-    // Test CorruptedTree with context
-    let error = BPlusTreeError::corrupted_tree("Linked list", "Cycle detected");
-    assert!(error.to_string().contains("Linked list corruption"));
-    assert!(error.to_string().contains("Cycle detected"));
-
-    // Test InvalidState with context
-    let error = BPlusTreeError::invalid_state("insert", "tree is locked");
-    assert!(error.to_string().contains("Cannot insert"));
-    assert!(error.to_string().contains("tree is locked"));
-
     // Test AllocationError with context
     let error = BPlusTreeError::allocation_error("leaf node", "arena full");
     assert!(error.to_string().contains("Failed to allocate leaf node"));

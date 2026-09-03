@@ -117,10 +117,9 @@ which are now pure descent cost — item 4c is the lever.
 
 ### 4. Random insert path
 
-1.16–1.6× behind depending on key distribution. The macOS sample profile
-(`profile.txt`) attributes the time to intra-leaf binary search + memmove
-(`insert.rs:63`), branch descent (`insert.rs:65-66`), and split work. In
-order of expected value:
+1.16–1.6× behind depending on key distribution. A sampling profile
+attributes the time to intra-leaf binary search + memmove, branch descent,
+and split work. In order of expected value:
 
 a. ~~**Stop zeroing vacated slots on split paths.**~~ — DONE, but
    **perf-neutral**. All `write_bytes` zeroing of vacated key/value/child
