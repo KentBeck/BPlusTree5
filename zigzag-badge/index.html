@@ -1,0 +1,701 @@
+<title>Zig-Zag Zouave Badge</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Anton&family=Playfair+Display:ital,wght@1,700&family=Libre+Franklin:wght@400;600&display=swap">
+<style>
+  :root {
+    --paper: #F6E8CB;
+    --paper-deep: #EAD7AC;
+    --ink: #1A1410;
+    --tobacco: #5A3A1E;
+    --orange: #F28C1E;
+    --fez: #C8102E;
+    --navy: #1E2A44;
+    --rule: rgba(90, 58, 30, 0.35);
+    --font-display: "Playfair Display", "Georgia", serif;
+    --font-ui: "Libre Franklin", "Helvetica Neue", Arial, sans-serif;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: var(--paper);
+    color: var(--ink);
+    font-family: var(--font-ui);
+    font-size: 15px;
+    line-height: 1.5;
+    min-height: 100vh;
+    background-image:
+      radial-gradient(circle at 12% 0%, rgba(242,140,30,0.18), transparent 45%),
+      radial-gradient(circle at 100% 100%, rgba(200,16,46,0.10), transparent 40%);
+  }
+  .page {
+    max-width: 1040px;
+    margin: 0 auto;
+    padding: 40px 24px 56px;
+  }
+  header { margin-bottom: 28px; max-width: 62ch; }
+  .eyebrow {
+    font-size: 12px;
+    font-weight: 600;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    color: var(--fez);
+    margin: 0 0 8px;
+  }
+  h1 {
+    font-family: var(--font-display);
+    font-style: italic;
+    font-weight: 700;
+    font-size: clamp(34px, 5vw, 52px);
+    line-height: 1.05;
+    margin: 0 0 12px;
+    text-wrap: balance;
+  }
+  header p { margin: 0; color: var(--tobacco); }
+
+  .studio {
+    display: grid;
+    grid-template-columns: minmax(280px, 600px) minmax(260px, 340px);
+    gap: 36px;
+    align-items: start;
+  }
+  @media (max-width: 760px) {
+    .studio { grid-template-columns: 1fr; }
+  }
+
+  .badge-wrap { position: relative; }
+  canvas#badge {
+    display: block;
+    width: 100%;
+    height: auto;
+    aspect-ratio: 1 / 1;
+    cursor: grab;
+    touch-action: none;
+    filter: drop-shadow(0 18px 28px rgba(60, 30, 5, 0.28));
+    border-radius: 50%;
+    outline: none;
+  }
+  canvas#badge:focus-visible { box-shadow: 0 0 0 4px var(--paper), 0 0 0 7px var(--fez); }
+  canvas#badge.dragging { cursor: grabbing; }
+  canvas#badge.over { filter: drop-shadow(0 0 0 10px rgba(242,140,30,0.6)); }
+  .badge-note {
+    margin: 16px 0 0;
+    font-size: 13px;
+    color: var(--tobacco);
+    text-align: center;
+  }
+
+  .panel {
+    border-top: 3px solid var(--ink);
+    padding-top: 18px;
+    display: grid;
+    gap: 22px;
+  }
+  fieldset {
+    border: 0;
+    padding: 0;
+    margin: 0;
+    display: grid;
+    gap: 10px;
+  }
+  legend {
+    font-size: 12px;
+    font-weight: 600;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: var(--tobacco);
+    padding: 0;
+    margin-bottom: 8px;
+  }
+  .row {
+    display: grid;
+    grid-template-columns: 96px 1fr;
+    align-items: center;
+    gap: 12px;
+  }
+  .row label { font-weight: 600; font-size: 14px; }
+  input[type="range"] {
+    width: 100%;
+    accent-color: var(--fez);
+  }
+  input[type="text"] {
+    width: 100%;
+    font: inherit;
+    padding: 8px 10px;
+    border: 1px solid var(--rule);
+    border-radius: 3px;
+    background: rgba(255,255,255,0.45);
+    color: var(--ink);
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+  }
+  input[type="text"]:focus-visible, .btn:focus-visible, .check input:focus-visible {
+    outline: 3px solid var(--orange);
+    outline-offset: 2px;
+  }
+  .checks {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 8px 16px;
+  }
+  .check {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 14px;
+  }
+  .check input { accent-color: var(--fez); width: 16px; height: 16px; margin: 0; }
+
+  .btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    font: inherit;
+    font-weight: 600;
+    padding: 10px 16px;
+    border-radius: 3px;
+    border: 2px solid var(--ink);
+    background: var(--orange);
+    color: var(--ink);
+    cursor: pointer;
+    text-align: center;
+  }
+  .btn.quiet {
+    background: transparent;
+  }
+  .btn:hover { background: #F9A146; }
+  .btn.quiet:hover { background: rgba(26,20,16,0.06); }
+  .btn-row { display: flex; flex-wrap: wrap; gap: 10px; }
+  input[type="file"] { position: absolute; width: 1px; height: 1px; opacity: 0; overflow: hidden; }
+  .hint { font-size: 13px; color: var(--tobacco); margin: 0; }
+  .toast {
+    font-size: 13px;
+    color: var(--ink);
+    min-height: 1.4em;
+    margin: 0;
+  }
+  @media (prefers-reduced-motion: no-preference) {
+    canvas#badge { transition: filter 160ms ease; }
+  }
+</style>
+
+<div class="page">
+  <header>
+    <p class="eyebrow">Papier à cigarettes · depuis 1879</p>
+    <h1>Le Zouave, c'est vous.</h1>
+    <p>Drop a photo onto the badge and it takes the Zouave's place: fez, beard, uniform collar and a freshly rolled one included. Drag to position, scroll to zoom.</p>
+  </header>
+
+  <div class="studio">
+    <div class="badge-wrap">
+      <canvas id="badge" width="1200" height="1200" tabindex="0" aria-label="Your personalised Zig-Zag badge. Drop a photo here."></canvas>
+      <p class="badge-note">Right-click the badge and choose “Save image as…” to keep the 1200 px PNG.</p>
+    </div>
+
+    <div class="panel">
+      <fieldset>
+        <legend>Photo</legend>
+        <div class="btn-row">
+          <label class="btn" for="file">Choose a photo</label>
+          <input type="file" id="file" accept="image/*">
+          <button class="btn quiet" id="reset" type="button">Re-centre</button>
+        </div>
+        <p class="hint">Or paste an image with Ctrl/⌘ + V. A head-and-shoulders shot with the face near the middle works best.</p>
+        <div class="row">
+          <label for="zoom">Zoom</label>
+          <input type="range" id="zoom" min="0.6" max="3" step="0.01" value="1">
+        </div>
+        <div class="row">
+          <label for="turn">Tilt</label>
+          <input type="range" id="turn" min="-25" max="25" step="1" value="0">
+        </div>
+      </fieldset>
+
+      <fieldset>
+        <legend>Costume</legend>
+        <div class="checks">
+          <label class="check"><input type="checkbox" id="fez" checked> Fez</label>
+          <label class="check"><input type="checkbox" id="beard" checked> Beard</label>
+          <label class="check"><input type="checkbox" id="cig" checked> Rolled one</label>
+          <label class="check"><input type="checkbox" id="collar" checked> Uniform</label>
+          <label class="check"><input type="checkbox" id="sepia" checked> Sepia tint</label>
+        </div>
+        <div class="row">
+          <label for="fezY">Fez height</label>
+          <input type="range" id="fezY" min="-140" max="80" step="1" value="0">
+        </div>
+        <div class="row">
+          <label for="beardY">Beard height</label>
+          <input type="range" id="beardY" min="-120" max="120" step="1" value="0">
+        </div>
+      </fieldset>
+
+      <fieldset>
+        <legend>Lettering</legend>
+        <div class="row">
+          <label for="caption">Bottom</label>
+          <input type="text" id="caption" maxlength="22" value="Depuis 1879" spellcheck="false">
+        </div>
+      </fieldset>
+
+      <fieldset>
+        <legend>Keep it</legend>
+        <div class="btn-row">
+          <button class="btn" id="copy" type="button">Copy image</button>
+        </div>
+        <p class="toast" id="toast" role="status" aria-live="polite"></p>
+      </fieldset>
+    </div>
+  </div>
+</div>
+
+<script>
+(function () {
+  const canvas = document.getElementById('badge');
+  const ctx = canvas.getContext('2d');
+  const W = 1200, H = 1200;
+  const CX = 600, CY = 600;          // badge centre
+  const WIN = { x: 600, y: 640, r: 290 }; // photo window
+
+  const C = {
+    orange: '#F28C1E', orangeDeep: '#D9741A', ink: '#1A1410', cream: '#F6E8CB',
+    fez: '#C8102E', fezDark: '#8E0B21', tobacco: '#5A3A1E', beardHi: '#7B5230',
+    navy: '#1E2A44', navyHi: '#2E3D62', gold: '#D9A441', paper: '#FFF6E6'
+  };
+
+  const state = {
+    img: null, fit: 1, zoom: 1, x: 0, y: 0, turn: 0,
+    fez: true, beard: true, cig: true, collar: true, sepia: true,
+    fezY: 0, beardY: 0, caption: 'DEPUIS 1879'
+  };
+
+  // ---------- helpers ----------
+  function arcText(text, r, fontSpec, opts) {
+    // opts: { top:true|false, fill, stroke, lineWidth, kern }
+    ctx.save();
+    ctx.font = fontSpec;
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'alphabetic';
+    const kern = opts.kern || 0;
+    const chars = Array.from(text);
+    const widths = chars.map(ch => ctx.measureText(ch).width + kern);
+    const total = widths.reduce((a, b) => a + b, 0) / r;   // radians
+    let ang = -total / 2;
+    for (let i = 0; i < chars.length; i++) {
+      const half = widths[i] / 2 / r;
+      ang += half;
+      ctx.save();
+      if (opts.top) {
+        ctx.translate(CX + r * Math.sin(ang), CY - r * Math.cos(ang));
+        ctx.rotate(ang);
+      } else {
+        ctx.translate(CX + r * Math.sin(ang), CY + r * Math.cos(ang));
+        ctx.rotate(-ang);
+      }
+      if (opts.stroke) {
+        ctx.lineJoin = 'round';
+        ctx.lineWidth = opts.lineWidth || 8;
+        ctx.strokeStyle = opts.stroke;
+        ctx.strokeText(chars[i], 0, 0);
+      }
+      ctx.fillStyle = opts.fill;
+      ctx.fillText(chars[i], 0, 0);
+      ctx.restore();
+      ang += half;
+    }
+    ctx.restore();
+  }
+
+  function zigzagArc(rA, rB, from, to, steps, color, width) {
+    ctx.save();
+    ctx.beginPath();
+    for (let i = 0; i <= steps; i++) {
+      const a = from + (to - from) * i / steps;
+      const r = i % 2 ? rB : rA;
+      const x = CX + r * Math.sin(a), y = CY - r * Math.cos(a);
+      if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+    }
+    ctx.lineJoin = 'miter';
+    ctx.lineCap = 'round';
+    ctx.strokeStyle = color;
+    ctx.lineWidth = width;
+    ctx.stroke();
+    ctx.restore();
+  }
+
+  // ---------- drawing ----------
+  function drawBackground() {
+    ctx.clearRect(0, 0, W, H);
+    // outer black ring
+    ctx.beginPath(); ctx.arc(CX, CY, 588, 0, Math.PI * 2);
+    ctx.fillStyle = C.ink; ctx.fill();
+    // orange disc
+    const g = ctx.createRadialGradient(CX - 120, CY - 160, 80, CX, CY, 600);
+    g.addColorStop(0, '#F8A038'); g.addColorStop(1, C.orangeDeep);
+    ctx.beginPath(); ctx.arc(CX, CY, 572, 0, Math.PI * 2);
+    ctx.fillStyle = g; ctx.fill();
+    // cream pinstripe ring
+    ctx.beginPath(); ctx.arc(CX, CY, 552, 0, Math.PI * 2);
+    ctx.strokeStyle = C.cream; ctx.lineWidth = 5; ctx.stroke();
+    ctx.beginPath(); ctx.arc(CX, CY, 540, 0, Math.PI * 2);
+    ctx.strokeStyle = C.ink; ctx.lineWidth = 2; ctx.stroke();
+  }
+
+  function drawPhotoWindow() {
+    ctx.save();
+    ctx.beginPath(); ctx.arc(WIN.x, WIN.y, WIN.r, 0, Math.PI * 2); ctx.clip();
+    ctx.fillStyle = C.paper;
+    ctx.fillRect(WIN.x - WIN.r, WIN.y - WIN.r, WIN.r * 2, WIN.r * 2);
+    if (state.img) {
+      const s = state.fit * state.zoom;
+      ctx.translate(WIN.x + state.x, WIN.y + state.y);
+      ctx.rotate(state.turn * Math.PI / 180);
+      ctx.scale(s, s);
+      if (state.sepia && 'filter' in ctx) ctx.filter = 'sepia(0.55) contrast(1.06) saturate(0.9)';
+      ctx.drawImage(state.img, -state.img.naturalWidth / 2, -state.img.naturalHeight / 2);
+      ctx.filter = 'none';
+    } else {
+      // silhouette placeholder
+      ctx.fillStyle = C.paper;
+      ctx.fillRect(WIN.x - WIN.r, WIN.y - WIN.r, WIN.r * 2, WIN.r * 2);
+      ctx.fillStyle = '#E4CFA6';
+      ctx.beginPath(); ctx.ellipse(WIN.x, WIN.y - 40, 128, 158, 0, 0, Math.PI * 2); ctx.fill();
+      ctx.beginPath(); ctx.ellipse(WIN.x, WIN.y + 260, 250, 150, 0, 0, Math.PI * 2); ctx.fill();
+      ctx.fillStyle = C.tobacco;
+      ctx.font = '600 26px "Libre Franklin", Arial, sans-serif';
+      ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+      ctx.fillText('Drop your photo here', WIN.x, WIN.y - 40);
+    }
+    ctx.restore();
+    // vignette inside the window
+    ctx.save();
+    ctx.beginPath(); ctx.arc(WIN.x, WIN.y, WIN.r, 0, Math.PI * 2); ctx.clip();
+    const v = ctx.createRadialGradient(WIN.x, WIN.y, WIN.r * 0.55, WIN.x, WIN.y, WIN.r);
+    v.addColorStop(0, 'rgba(60,30,5,0)'); v.addColorStop(1, 'rgba(60,30,5,0.42)');
+    ctx.fillStyle = v; ctx.fillRect(0, 0, W, H);
+    ctx.restore();
+  }
+
+  function drawCollar() {
+    if (!state.collar) return;
+    const top = WIN.y + 150 + state.beardY * 0.4;
+    ctx.save();
+    ctx.beginPath(); ctx.arc(WIN.x, WIN.y, WIN.r + 4, 0, Math.PI * 2); ctx.clip();
+    // jacket
+    ctx.beginPath();
+    ctx.moveTo(WIN.x - 340, WIN.y + WIN.r + 20);
+    ctx.lineTo(WIN.x - 340, top + 80);
+    ctx.quadraticCurveTo(WIN.x - 200, top - 10, WIN.x - 60, top + 20);
+    ctx.lineTo(WIN.x, top + 100);
+    ctx.lineTo(WIN.x + 60, top + 20);
+    ctx.quadraticCurveTo(WIN.x + 200, top - 10, WIN.x + 340, top + 80);
+    ctx.lineTo(WIN.x + 340, WIN.y + WIN.r + 20);
+    ctx.closePath();
+    ctx.fillStyle = C.navy; ctx.fill();
+    // red braid along the collar edge
+    ctx.beginPath();
+    ctx.moveTo(WIN.x - 340, top + 80);
+    ctx.quadraticCurveTo(WIN.x - 200, top - 10, WIN.x - 60, top + 20);
+    ctx.lineTo(WIN.x, top + 100);
+    ctx.lineTo(WIN.x + 60, top + 20);
+    ctx.quadraticCurveTo(WIN.x + 200, top - 10, WIN.x + 340, top + 80);
+    ctx.strokeStyle = C.fez; ctx.lineWidth = 14; ctx.lineJoin = 'round'; ctx.stroke();
+    ctx.strokeStyle = C.gold; ctx.lineWidth = 3; ctx.stroke();
+    // buttons
+    ctx.fillStyle = C.gold;
+    [150, 215, 280].forEach(d => {
+      ctx.beginPath(); ctx.arc(WIN.x, top + d, 12, 0, Math.PI * 2); ctx.fill();
+      ctx.beginPath(); ctx.arc(WIN.x, top + d, 12, 0, Math.PI * 2);
+      ctx.strokeStyle = C.ink; ctx.lineWidth = 2; ctx.stroke();
+    });
+    ctx.restore();
+  }
+
+  function drawBeard() {
+    if (!state.beard) return;
+    const y0 = WIN.y + 50 + state.beardY;   // roughly the mouth line
+    ctx.save();
+    ctx.beginPath(); ctx.arc(WIN.x, WIN.y, WIN.r + 10, 0, Math.PI * 2); ctx.clip();
+    // main beard mass with a wavy silhouette
+    ctx.beginPath();
+    ctx.moveTo(WIN.x - 150, y0 - 60);
+    ctx.quadraticCurveTo(WIN.x - 200, y0 + 30, WIN.x - 170, y0 + 110);
+    ctx.quadraticCurveTo(WIN.x - 150, y0 + 190, WIN.x - 80, y0 + 235);
+    ctx.quadraticCurveTo(WIN.x - 30, y0 + 275, WIN.x, y0 + 285);
+    ctx.quadraticCurveTo(WIN.x + 30, y0 + 275, WIN.x + 80, y0 + 235);
+    ctx.quadraticCurveTo(WIN.x + 150, y0 + 190, WIN.x + 170, y0 + 110);
+    ctx.quadraticCurveTo(WIN.x + 200, y0 + 30, WIN.x + 150, y0 - 60);
+    ctx.quadraticCurveTo(WIN.x + 90, y0 + 5, WIN.x, y0 + 15);
+    ctx.quadraticCurveTo(WIN.x - 90, y0 + 5, WIN.x - 150, y0 - 60);
+    ctx.closePath();
+    ctx.fillStyle = C.tobacco; ctx.fill();
+    // hair strokes
+    ctx.strokeStyle = C.beardHi; ctx.lineWidth = 5; ctx.lineCap = 'round';
+    for (let i = -5; i <= 5; i++) {
+      ctx.beginPath();
+      ctx.moveTo(WIN.x + i * 26, y0 + 30);
+      ctx.quadraticCurveTo(WIN.x + i * 34, y0 + 140, WIN.x + i * 20, y0 + 225 - Math.abs(i) * 14);
+      ctx.stroke();
+    }
+    // moustache
+    ctx.beginPath();
+    ctx.moveTo(WIN.x, y0 - 8);
+    ctx.quadraticCurveTo(WIN.x - 70, y0 - 60, WIN.x - 135, y0 - 28);
+    ctx.quadraticCurveTo(WIN.x - 90, y0 - 10, WIN.x - 60, y0 + 6);
+    ctx.quadraticCurveTo(WIN.x - 30, y0 + 16, WIN.x, y0 + 8);
+    ctx.quadraticCurveTo(WIN.x + 30, y0 + 16, WIN.x + 60, y0 + 6);
+    ctx.quadraticCurveTo(WIN.x + 90, y0 - 10, WIN.x + 135, y0 - 28);
+    ctx.quadraticCurveTo(WIN.x + 70, y0 - 60, WIN.x, y0 - 8);
+    ctx.closePath();
+    ctx.fillStyle = '#3F2812'; ctx.fill();
+    ctx.restore();
+  }
+
+  function drawCigarette() {
+    if (!state.cig) return;
+    const y0 = WIN.y + 50 + state.beardY;
+    ctx.save();
+    ctx.translate(WIN.x - 40, y0 + 4);
+    ctx.rotate(-0.42);
+    // paper
+    ctx.fillStyle = '#FFFDF7';
+    ctx.strokeStyle = C.ink; ctx.lineWidth = 3;
+    roundRect(-6, -10, 150, 20, 8); ctx.fill(); ctx.stroke();
+    // twisted tip and ember
+    ctx.fillStyle = '#E9E0CC'; roundRect(118, -8, 22, 16, 6); ctx.fill();
+    ctx.beginPath(); ctx.arc(146, 0, 9, 0, Math.PI * 2);
+    ctx.fillStyle = '#FF6B1A'; ctx.fill();
+    ctx.beginPath(); ctx.arc(146, 0, 4, 0, Math.PI * 2);
+    ctx.fillStyle = '#FFE28A'; ctx.fill();
+    ctx.restore();
+    // smoke
+    const sx = WIN.x - 40 + 146 * Math.cos(-0.42);
+    const sy = y0 + 4 + 146 * Math.sin(-0.42);
+    ctx.save();
+    ctx.lineCap = 'round';
+    [[0, 0.75, 9], [22, 0.5, 6], [-18, 0.35, 5]].forEach(([dx, a, w]) => {
+      ctx.beginPath();
+      ctx.moveTo(sx + dx, sy);
+      ctx.bezierCurveTo(sx + dx - 60, sy - 60, sx + dx + 50, sy - 120, sx + dx - 20, sy - 190);
+      ctx.bezierCurveTo(sx + dx - 60, sy - 240, sx + dx + 30, sy - 280, sx + dx - 10, sy - 330);
+      ctx.strokeStyle = 'rgba(255,250,240,' + a + ')';
+      ctx.lineWidth = w; ctx.stroke();
+    });
+    ctx.restore();
+  }
+
+  function drawFez() {
+    if (!state.fez) return;
+    const base = WIN.y - 150 + state.fezY;  // bottom edge of the fez
+    ctx.save();
+    ctx.translate(WIN.x + 10, base);
+    ctx.rotate(-0.12);
+    // body
+    ctx.beginPath();
+    ctx.moveTo(-165, 0);
+    ctx.lineTo(-128, -200);
+    ctx.quadraticCurveTo(0, -240, 128, -200);
+    ctx.lineTo(165, 0);
+    ctx.quadraticCurveTo(0, 30, -165, 0);
+    ctx.closePath();
+    ctx.fillStyle = C.fez; ctx.fill();
+    ctx.strokeStyle = C.ink; ctx.lineWidth = 6; ctx.lineJoin = 'round'; ctx.stroke();
+    // shading band
+    ctx.beginPath();
+    ctx.moveTo(-165, 0);
+    ctx.quadraticCurveTo(0, 30, 165, 0);
+    ctx.lineTo(158, -40);
+    ctx.quadraticCurveTo(0, -12, -158, -40);
+    ctx.closePath();
+    ctx.fillStyle = C.fezDark; ctx.fill();
+    // top ellipse highlight
+    ctx.beginPath();
+    ctx.ellipse(0, -212, 128, 22, 0, 0, Math.PI * 2);
+    ctx.fillStyle = '#E02040'; ctx.fill();
+    ctx.strokeStyle = C.ink; ctx.lineWidth = 4; ctx.stroke();
+    // tassel
+    ctx.beginPath();
+    ctx.moveTo(0, -212);
+    ctx.quadraticCurveTo(120, -215, 165, -150);
+    ctx.quadraticCurveTo(190, -110, 178, -20);
+    ctx.strokeStyle = C.ink; ctx.lineWidth = 6; ctx.lineCap = 'round'; ctx.stroke();
+    ctx.beginPath();
+    ctx.moveTo(178, -20);
+    ctx.lineTo(160, 60); ctx.lineTo(196, 60); ctx.closePath();
+    ctx.fillStyle = C.navy; ctx.fill(); ctx.stroke();
+    ctx.beginPath(); ctx.arc(178, -18, 12, 0, Math.PI * 2);
+    ctx.fillStyle = C.gold; ctx.fill(); ctx.stroke();
+    ctx.restore();
+  }
+
+  function drawFrame() {
+    ctx.beginPath(); ctx.arc(WIN.x, WIN.y, WIN.r, 0, Math.PI * 2);
+    ctx.strokeStyle = C.ink; ctx.lineWidth = 12; ctx.stroke();
+    ctx.beginPath(); ctx.arc(WIN.x, WIN.y, WIN.r + 12, 0, Math.PI * 2);
+    ctx.strokeStyle = C.cream; ctx.lineWidth = 6; ctx.stroke();
+  }
+
+  function drawLettering() {
+    // wordmark
+    arcText('ZIG-ZAG', 428, '400 132px "Anton", "Impact", "Arial Narrow", sans-serif',
+      { top: true, fill: C.fez, stroke: C.ink, lineWidth: 16, kern: 6 });
+    arcText('ZIG-ZAG', 428, '400 132px "Anton", "Impact", "Arial Narrow", sans-serif',
+      { top: true, fill: C.fez, stroke: C.cream, lineWidth: 5, kern: 6 });
+    // zigzag underline on the same arc
+    zigzagArc(384, 364, -0.62, 0.62, 16, C.ink, 16);
+    zigzagArc(384, 364, -0.62, 0.62, 16, C.cream, 6);
+    // caption
+    const cap = state.caption.trim() || 'DEPUIS 1879';
+    arcText(cap, 520, 'italic 700 58px "Playfair Display", "Georgia", serif',
+      { top: false, fill: C.cream, stroke: C.ink, lineWidth: 9, kern: 5 });
+    // small side marks
+    ctx.save();
+    ctx.fillStyle = C.ink;
+    ctx.font = '600 26px "Libre Franklin", Arial, sans-serif';
+    ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    [[-0.98, 'N°1'], [0.98, '1879']].forEach(([a, t]) => {
+      ctx.save();
+      ctx.translate(CX + 470 * Math.sin(a), CY - 470 * Math.cos(a));
+      ctx.rotate(a);
+      ctx.fillText(t, 0, 0);
+      ctx.restore();
+    });
+    ctx.restore();
+  }
+
+  function roundRect(x, y, w, h, r) {
+    ctx.beginPath();
+    ctx.moveTo(x + r, y);
+    ctx.arcTo(x + w, y, x + w, y + h, r);
+    ctx.arcTo(x + w, y + h, x, y + h, r);
+    ctx.arcTo(x, y + h, x, y, r);
+    ctx.arcTo(x, y, x + w, y, r);
+    ctx.closePath();
+  }
+
+  function render() {
+    drawBackground();
+    drawPhotoWindow();
+    drawCollar();
+    drawBeard();
+    drawCigarette();
+    drawFez();
+    drawFrame();
+    drawLettering();
+  }
+
+  // ---------- image loading ----------
+  function loadFile(file) {
+    if (!file || !file.type.startsWith('image/')) { say('That file is not an image.'); return; }
+    const reader = new FileReader();
+    reader.onload = e => {
+      const img = new Image();
+      img.onload = () => {
+        state.img = img;
+        state.fit = (WIN.r * 2) / Math.min(img.naturalWidth, img.naturalHeight) * 1.15;
+        state.zoom = 1; state.x = 0; state.y = -20; state.turn = 0;
+        zoomEl.value = 1; turnEl.value = 0;
+        say('Photo loaded. Drag it into place, scroll to zoom.');
+        render();
+      };
+      img.onerror = () => say('Could not read that image.');
+      img.src = e.target.result;
+    };
+    reader.readAsDataURL(file);
+  }
+
+  const fileEl = document.getElementById('file');
+  fileEl.addEventListener('change', () => loadFile(fileEl.files[0]));
+
+  canvas.addEventListener('dragover', e => { e.preventDefault(); canvas.classList.add('over'); });
+  canvas.addEventListener('dragleave', () => canvas.classList.remove('over'));
+  canvas.addEventListener('drop', e => {
+    e.preventDefault(); canvas.classList.remove('over');
+    if (e.dataTransfer.files && e.dataTransfer.files[0]) loadFile(e.dataTransfer.files[0]);
+  });
+  document.addEventListener('paste', e => {
+    const items = e.clipboardData && e.clipboardData.items;
+    if (!items) return;
+    for (const it of items) {
+      if (it.type.startsWith('image/')) { loadFile(it.getAsFile()); break; }
+    }
+  });
+
+  // ---------- pan / zoom ----------
+  let drag = null;
+  const scaleFactor = () => W / canvas.getBoundingClientRect().width;
+  canvas.addEventListener('pointerdown', e => {
+    if (!state.img) return;
+    drag = { px: e.clientX, py: e.clientY, x: state.x, y: state.y };
+    canvas.setPointerCapture(e.pointerId);
+    canvas.classList.add('dragging');
+  });
+  canvas.addEventListener('pointermove', e => {
+    if (!drag) return;
+    const k = scaleFactor();
+    state.x = drag.x + (e.clientX - drag.px) * k;
+    state.y = drag.y + (e.clientY - drag.py) * k;
+    render();
+  });
+  const endDrag = () => { drag = null; canvas.classList.remove('dragging'); };
+  canvas.addEventListener('pointerup', endDrag);
+  canvas.addEventListener('pointercancel', endDrag);
+  canvas.addEventListener('wheel', e => {
+    if (!state.img) return;
+    e.preventDefault();
+    const z = Math.min(3, Math.max(0.6, state.zoom * (e.deltaY < 0 ? 1.06 : 0.94)));
+    state.zoom = z; zoomEl.value = z; render();
+  }, { passive: false });
+  canvas.addEventListener('keydown', e => {
+    if (!state.img) return;
+    const step = e.shiftKey ? 20 : 5;
+    const map = { ArrowLeft: [-step, 0], ArrowRight: [step, 0], ArrowUp: [0, -step], ArrowDown: [0, step] };
+    if (map[e.key]) { e.preventDefault(); state.x += map[e.key][0]; state.y += map[e.key][1]; render(); }
+  });
+
+  // ---------- controls ----------
+  const zoomEl = document.getElementById('zoom');
+  const turnEl = document.getElementById('turn');
+  zoomEl.addEventListener('input', () => { state.zoom = +zoomEl.value; render(); });
+  turnEl.addEventListener('input', () => { state.turn = +turnEl.value; render(); });
+  document.getElementById('reset').addEventListener('click', () => {
+    state.x = 0; state.y = -20; state.zoom = 1; state.turn = 0;
+    zoomEl.value = 1; turnEl.value = 0; render();
+  });
+  ['fez', 'beard', 'cig', 'collar', 'sepia'].forEach(id => {
+    const el = document.getElementById(id);
+    el.addEventListener('change', () => { state[id] = el.checked; render(); });
+  });
+  ['fezY', 'beardY'].forEach(id => {
+    const el = document.getElementById(id);
+    el.addEventListener('input', () => { state[id] = +el.value; render(); });
+  });
+  const capEl = document.getElementById('caption');
+  capEl.addEventListener('input', () => { state.caption = capEl.value.toUpperCase(); render(); });
+
+  const toast = document.getElementById('toast');
+  let toastTimer;
+  function say(msg) {
+    toast.textContent = msg;
+    clearTimeout(toastTimer);
+    toastTimer = setTimeout(() => { toast.textContent = ''; }, 5000);
+  }
+
+  document.getElementById('copy').addEventListener('click', async () => {
+    try {
+      const blob = await new Promise(res => canvas.toBlob(res, 'image/png'));
+      await navigator.clipboard.write([new ClipboardItem({ 'image/png': blob })]);
+      say('Copied. Paste it anywhere that takes an image.');
+    } catch (err) {
+      say('Copy is blocked here. Right-click the badge and choose “Save image as…” instead.');
+    }
+  });
+
+  // ---------- go ----------
+  render();
+  if (document.fonts && document.fonts.ready) {
+    document.fonts.ready.then(render);
+    ['400 132px "Anton"', 'italic 700 58px "Playfair Display"', '600 26px "Libre Franklin"']
+      .forEach(f => document.fonts.load(f).then(render).catch(() => {}));
+  }
+})();
+</script>
