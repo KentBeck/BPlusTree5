@@ -22,76 +22,93 @@ impl<K: Ord + Clone, V> BPlusTreeMap<K, V> {
         result
     }
 
+    /// Shrink a root branch that has at most two children down to its one
+    /// surviving child, or to an empty tree when nothing survives.
     unsafe fn check_root_collapse(&mut self) {
-        if let Some(root) = self.root {
-            let hdr = &*(root.as_ptr() as *const NodeHdr);
-            if hdr.tag == NodeTag::Branch {
-                let parts = layout::carve_branch::<K>(root, &self.branch_layout);
-                let len = (*parts.hdr).len as usize;
-                if len <= 1 {
-                    let child_count = len + 1;
-                    let mut keep_child: Option<NonNull<u8>> = None;
-                    let mut keep_is_leaf = false;
+        let Some(root) = self.root else {
+            return;
+        };
+        if self.is_leaf(root) {
+            return;
+        }
+        let parts = layout::carve_branch::<K>(root, &self.branch_layout);
+        let child_count = (*parts.hdr).len as usize + 1;
+        if child_count > 2 {
+            return;
+        }
 
-                    for i in 0..child_count {
-                        let slot = parts.children_ptr.add(i) as *mut *mut u8;
-                        let child_ptr = *slot;
-                        if child_ptr.is_null() {
-                            continue;
-                        }
+        let children = parts.children_ptr as *mut *mut u8;
+        let Some(survivor) = self.consolidate_root_children(children, child_count) else {
+            return;
+        };
+        self.replace_root(root, survivor);
+    }
 
-                        let child_hdr = &*(child_ptr as *const NodeHdr);
-                        match child_hdr.tag {
-                            NodeTag::Leaf => {
-                                let child = NonNull::new_unchecked(child_ptr);
-                                if (*child_hdr).len == 0 {
-                                    self.free_emptied_leaf(child);
-                                    *slot = ptr::null_mut();
-                                    continue;
-                                }
-                                if let Some(existing) = keep_child {
-                                    if !keep_is_leaf {
-                                        return;
-                                    }
-                                    let existing_hdr = &*(existing.as_ptr() as *const NodeHdr);
-                                    let existing_len = (*existing_hdr).len as usize;
-                                    let child_len = (*child_hdr).len as usize;
-                                    if existing_len + child_len > self.leaf_layout.cap as usize {
-                                        return;
-                                    }
-                                    self.merge_leaf_into(existing, child);
-                                    self.free_emptied_leaf(child);
-                                    *slot = ptr::null_mut();
-                                } else {
-                                    keep_child = Some(child);
-                                    keep_is_leaf = true;
-                                }
-                            }
-                            NodeTag::Branch => {
-                                if keep_child.is_some() {
-                                    return;
-                                }
-                                keep_child = Some(NonNull::new_unchecked(child_ptr));
-                                keep_is_leaf = false;
-                            }
-                        }
-                    }
+    /// Fold the root's `child_count` children down to at most one node:
+    /// drop emptied leaves and merge two leaves that fit together. Returns
+    /// `None` when the root still needs more than one child, otherwise the
+    /// child that should become the new root (`Some(None)` when none is
+    /// left).
+    unsafe fn consolidate_root_children(
+        &mut self,
+        children: *mut *mut u8,
+        child_count: usize,
+    ) -> Option<Option<NonNull<u8>>> {
+        let mut survivor: Option<NonNull<u8>> = None;
+        for i in 0..child_count {
+            let slot = children.add(i);
+            let Some(child) = NonNull::new(*slot) else {
+                continue;
+            };
+            if self.is_leaf(child) && self.node_len(child) == 0 {
+                self.free_emptied_leaf(child);
+                *slot = ptr::null_mut();
+                continue;
+            }
+            let Some(kept) = survivor else {
+                survivor = Some(child);
+                continue;
+            };
+            if !self.try_merge_leaves(kept, child) {
+                return None;
+            }
+            *slot = ptr::null_mut();
+        }
+        Some(survivor)
+    }
 
-                    // Unlike the merge paths, a collapsing root still owns its
-                    // separators: nothing moved them elsewhere.
-                    self.empty_branch(root);
-                    if let Some(child) = keep_child {
-                        if keep_is_leaf {
-                            self.make_leaf_root(child);
-                        }
-                        self.root = Some(child);
-                    } else {
-                        self.root = None;
-                    }
-                    self.free_emptied_branch(root);
-                }
+    /// Merge `source` into `target` and free `source`, but only when both
+    /// are leaves whose contents fit in one. Returns whether it merged.
+    unsafe fn try_merge_leaves(&mut self, target: NonNull<u8>, source: NonNull<u8>) -> bool {
+        if !self.is_leaf(target) || !self.is_leaf(source) {
+            return false;
+        }
+        if self.node_len(target) + self.node_len(source) > self.leaf_layout.cap as usize {
+            return false;
+        }
+        self.merge_leaf_into(target, source);
+        self.free_emptied_leaf(source);
+        true
+    }
+
+    /// Free the old root branch and install `survivor` (or nothing) in its
+    /// place.
+    unsafe fn replace_root(&mut self, root: NonNull<u8>, survivor: Option<NonNull<u8>>) {
+        // Unlike the merge paths, a collapsing root still owns its
+        // separators: nothing moved them elsewhere.
+        self.empty_branch(root);
+        if let Some(child) = survivor {
+            if self.is_leaf(child) {
+                self.make_leaf_root(child);
             }
         }
+        self.root = survivor;
+        self.free_emptied_branch(root);
+    }
+
+    #[inline(always)]
+    unsafe fn is_leaf(&self, node: NonNull<u8>) -> bool {
+        (*(node.as_ptr() as *const NodeHdr)).tag == NodeTag::Leaf
     }
 
     unsafe fn make_leaf_root(&self, leaf: NonNull<u8>) {
