@@ -3,6 +3,16 @@ use crate::{
 };
 use core::ptr::{self, NonNull};
 
+/// How to refill an underfull child, chosen by `plan_rebalance`.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+enum Rebalance {
+    Keep,
+    BorrowFromLeft,
+    BorrowFromRight,
+    MergeWithLeft,
+    MergeWithRight,
+}
+
 impl<K: Ord + Clone, V> BPlusTreeMap<K, V> {
     pub fn remove(&mut self, key: &K) -> Option<V> {
         let root = self.root?;
@@ -216,42 +226,22 @@ impl<K: Ord + Clone, V> BPlusTreeMap<K, V> {
 
     /// Restore minimum fill for `children[child_idx]` after a removal:
     /// borrow from a sibling that can spare an entry, else merge with one.
-    /// `rebalance_branch_child` is its structural twin; null siblings can
-    /// occur at the root while `check_root_collapse` is mid-repair.
+    /// `rebalance_branch_child` is its structural twin; both defer the
+    /// decision to `plan_rebalance` and only supply the leaf or branch
+    /// flavour of each repair.
     unsafe fn rebalance_leaf_child(
         &mut self,
         branch: NonNull<u8>,
         child_idx: usize,
         branch_len: usize,
     ) {
-        let parts = layout::carve_branch::<K>(branch, &self.branch_layout);
-        let children = parts.children_ptr as *mut *mut u8;
-
-        let child = NonNull::new_unchecked(*children.add(child_idx));
         let min = self.min_leaf_len();
-        if self.node_len(child) >= min {
-            return;
-        }
-
-        if child_idx > 0 {
-            if let Some(left) = NonNull::new(*children.add(child_idx - 1)) {
-                if self.node_len(left) > min {
-                    return self.rotate_leaf_right(branch, child_idx - 1);
-                }
-            }
-        }
-        if child_idx < branch_len {
-            if let Some(right) = NonNull::new(*children.add(child_idx + 1)) {
-                if self.node_len(right) > min {
-                    return self.rotate_leaf_left(branch, child_idx);
-                }
-            }
-        }
-
-        if child_idx > 0 {
-            self.merge_leaf_pair(branch, child_idx - 1);
-        } else if child_idx < branch_len {
-            self.merge_leaf_pair(branch, child_idx);
+        match self.plan_rebalance(branch, child_idx, branch_len, min) {
+            Rebalance::Keep => {}
+            Rebalance::BorrowFromLeft => self.rotate_leaf_right(branch, child_idx - 1),
+            Rebalance::BorrowFromRight => self.rotate_leaf_left(branch, child_idx),
+            Rebalance::MergeWithLeft => self.merge_leaf_pair(branch, child_idx - 1),
+            Rebalance::MergeWithRight => self.merge_leaf_pair(branch, child_idx),
         }
     }
 
@@ -262,35 +252,57 @@ impl<K: Ord + Clone, V> BPlusTreeMap<K, V> {
         child_idx: usize,
         branch_len: usize,
     ) {
+        let min = self.min_branch_len();
+        match self.plan_rebalance(branch, child_idx, branch_len, min) {
+            Rebalance::Keep => {}
+            Rebalance::BorrowFromLeft => self.rotate_branch_right(branch, child_idx - 1),
+            Rebalance::BorrowFromRight => self.rotate_branch_left(branch, child_idx),
+            Rebalance::MergeWithLeft => self.merge_branch_pair(branch, child_idx - 1),
+            Rebalance::MergeWithRight => self.merge_branch_pair(branch, child_idx),
+        }
+    }
+
+    /// Decide how to refill `children[child_idx]` when it has dropped below
+    /// `min`: prefer borrowing from a sibling that holds more than `min`
+    /// (left first), else merge with the left sibling, else the right.
+    /// Null siblings can occur at the root while `check_root_collapse` is
+    /// mid-repair; they can never lend, but the merge fallback assumes the
+    /// chosen neighbour is present, as it always is below the root.
+    unsafe fn plan_rebalance(
+        &self,
+        branch: NonNull<u8>,
+        child_idx: usize,
+        branch_len: usize,
+        min: usize,
+    ) -> Rebalance {
         let parts = layout::carve_branch::<K>(branch, &self.branch_layout);
         let children = parts.children_ptr as *mut *mut u8;
+        let has_left = child_idx > 0;
+        let has_right = child_idx < branch_len;
 
         let child = NonNull::new_unchecked(*children.add(child_idx));
-        let min = self.min_branch_len();
         if self.node_len(child) >= min {
-            return;
+            return Rebalance::Keep;
         }
+        if has_left && self.child_len(children, child_idx - 1) > min {
+            return Rebalance::BorrowFromLeft;
+        }
+        if has_right && self.child_len(children, child_idx + 1) > min {
+            return Rebalance::BorrowFromRight;
+        }
+        if has_left {
+            return Rebalance::MergeWithLeft;
+        }
+        if has_right {
+            return Rebalance::MergeWithRight;
+        }
+        Rebalance::Keep
+    }
 
-        if child_idx > 0 {
-            if let Some(left) = NonNull::new(*children.add(child_idx - 1)) {
-                if self.node_len(left) > min {
-                    return self.rotate_branch_right(branch, child_idx - 1);
-                }
-            }
-        }
-        if child_idx < branch_len {
-            if let Some(right) = NonNull::new(*children.add(child_idx + 1)) {
-                if self.node_len(right) > min {
-                    return self.rotate_branch_left(branch, child_idx);
-                }
-            }
-        }
-
-        if child_idx > 0 {
-            self.merge_branch_pair(branch, child_idx - 1);
-        } else if child_idx < branch_len {
-            self.merge_branch_pair(branch, child_idx);
-        }
+    /// Length of `children[idx]`, or 0 for a null slot.
+    #[inline(always)]
+    unsafe fn child_len(&self, children: *mut *mut u8, idx: usize) -> usize {
+        NonNull::new(*children.add(idx)).map_or(0, |node| self.node_len(node))
     }
 
     /// Rotate one entry rightward through separator `sep_idx`: the left
