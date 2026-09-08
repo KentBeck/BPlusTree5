@@ -3,6 +3,17 @@ use crate::{
 };
 use core::ptr::{self, NonNull};
 
+/// What became of one root child during a root collapse.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+enum RootChild {
+    /// Freed; its slot must be cleared.
+    Freed,
+    /// Kept as the collapse's survivor.
+    Survives,
+    /// Cannot be folded in, so the root must stay.
+    Blocks,
+}
+
 /// How to refill an underfull child, chosen by `plan_rebalance`.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 enum Rebalance {
@@ -70,21 +81,36 @@ impl<K: Ord + Clone, V> BPlusTreeMap<K, V> {
             let Some(child) = NonNull::new(*slot) else {
                 continue;
             };
-            if self.is_leaf(child) && self.node_len(child) == 0 {
-                self.free_emptied_leaf(child);
-                *slot = ptr::null_mut();
-                continue;
+            match self.absorb_root_child(survivor, child) {
+                RootChild::Freed => *slot = ptr::null_mut(),
+                RootChild::Survives => survivor = Some(child),
+                RootChild::Blocks => return None,
             }
-            let Some(kept) = survivor else {
-                survivor = Some(child);
-                continue;
-            };
-            if !self.try_merge_leaves(kept, child) {
-                return None;
-            }
-            *slot = ptr::null_mut();
         }
         Some(survivor)
+    }
+
+    /// Fold one root child into the collapse so far: an emptied leaf is
+    /// freed outright, the first real child becomes the survivor, and a
+    /// later leaf is merged into a leaf survivor when it fits. Anything
+    /// else means the root cannot collapse.
+    unsafe fn absorb_root_child(
+        &mut self,
+        survivor: Option<NonNull<u8>>,
+        child: NonNull<u8>,
+    ) -> RootChild {
+        if self.is_leaf(child) && self.node_len(child) == 0 {
+            self.free_emptied_leaf(child);
+            return RootChild::Freed;
+        }
+        let Some(kept) = survivor else {
+            return RootChild::Survives;
+        };
+        if self.try_merge_leaves(kept, child) {
+            RootChild::Freed
+        } else {
+            RootChild::Blocks
+        }
     }
 
     /// Merge `source` into `target` and free `source`, but only when both

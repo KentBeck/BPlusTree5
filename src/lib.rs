@@ -63,38 +63,30 @@ impl<K, V> BPlusTreeMap<K, V> {
     unsafe fn drop_subtree(&mut self, node: NonNull<u8>) {
         let hdr = &*(node.as_ptr() as *const NodeHdr);
         match hdr.tag {
-            NodeTag::Leaf => {
-                let parts = layout::carve_leaf::<K, V>(node, &self.leaf_layout);
-                let len = (*parts.hdr).len as usize;
-
-                // Drop all keys and values
-                for i in 0..len {
-                    ptr::drop_in_place((parts.keys_ptr as *mut K).add(i));
-                    ptr::drop_in_place((parts.vals_ptr as *mut V).add(i));
-                }
-
-                free_leaf_block(node, &self.leaf_layout);
-            }
-            NodeTag::Branch => {
-                let parts = layout::carve_branch::<K>(node, &self.branch_layout);
-                let len = (*parts.hdr).len as usize;
-
-                // Recursively free all children first
-                for i in 0..=len {
-                    let child_ptr = *((parts.children_ptr as *const *mut u8).add(i));
-                    if let Some(child) = NonNull::new(child_ptr) {
-                        self.drop_subtree(child);
-                    }
-                }
-
-                // Drop all separator keys
-                for i in 0..len {
-                    ptr::drop_in_place((parts.keys_ptr as *mut K).add(i));
-                }
-
-                free_branch_block(node, &self.branch_layout);
-            }
+            NodeTag::Leaf => self.drop_leaf(node),
+            NodeTag::Branch => self.drop_branch(node),
         }
+    }
+
+    unsafe fn drop_leaf(&mut self, node: NonNull<u8>) {
+        let parts = layout::carve_leaf::<K, V>(node, &self.leaf_layout);
+        let len = (*parts.hdr).len as usize;
+        ptr::drop_in_place(ptr::slice_from_raw_parts_mut(parts.keys_ptr as *mut K, len));
+        ptr::drop_in_place(ptr::slice_from_raw_parts_mut(parts.vals_ptr as *mut V, len));
+        free_leaf_block(node, &self.leaf_layout);
+    }
+
+    /// Children go first so their nodes are gone before the separators
+    /// that ordered them.
+    unsafe fn drop_branch(&mut self, node: NonNull<u8>) {
+        let parts = layout::carve_branch::<K>(node, &self.branch_layout);
+        let len = (*parts.hdr).len as usize;
+        let children = core::slice::from_raw_parts(parts.children_ptr as *const *mut u8, len + 1);
+        for child in children.iter().filter_map(|&p| NonNull::new(p)) {
+            self.drop_subtree(child);
+        }
+        ptr::drop_in_place(ptr::slice_from_raw_parts_mut(parts.keys_ptr as *mut K, len));
+        free_branch_block(node, &self.branch_layout);
     }
 }
 
