@@ -182,81 +182,58 @@ impl<K: Ord + Clone, V> BPlusTreeMap<K, V> {
 
     /// Resolve the start bound to the position of the first in-range item.
     unsafe fn resolve_front(&self, start: Bound<&K>) -> Option<(NonNull<u8>, usize)> {
-        match start {
-            Bound::Unbounded => {
-                let leaf = self.leftmost_leaf()?;
-                let parts = layout::carve_leaf::<K, V>(leaf, &self.leaf_layout);
-                // Only a root leaf can be empty, and it has no siblings.
-                if (*parts.hdr).len == 0 {
-                    return None;
-                }
-                Some((leaf, 0))
-            }
-            Bound::Included(k) | Bound::Excluded(k) => {
-                let excluded = matches!(start, Bound::Excluded(_));
-                let leaf = self.leaf_for_key(k)?;
-                let parts = layout::carve_leaf::<K, V>(leaf, &self.leaf_layout);
-                let len = (*parts.hdr).len as usize;
-                let keys = core::slice::from_raw_parts(parts.keys_ptr as *const K, len);
-                let idx = match keys.binary_search(k) {
-                    Ok(i) => {
-                        if excluded {
-                            i + 1
-                        } else {
-                            i
-                        }
-                    }
-                    Err(i) => i,
-                };
-                if idx < len {
-                    Some((leaf, idx))
-                } else {
-                    // Non-root leaves are never empty.
-                    NonNull::new(*parts.next_ptr).map(|next| (next, 0))
-                }
-            }
+        let Some(k) = bound_key(start) else {
+            let leaf = self.leftmost_leaf()?;
+            // Only a root leaf can be empty, and it has no siblings.
+            return (self.node_len(leaf) > 0).then_some((leaf, 0));
+        };
+        // An excluded start skips an exact match, so the cut sits after it.
+        let after_equal = matches!(start, Bound::Excluded(_));
+        let (leaf, idx, len) = self.cut_in_leaf(k, after_equal)?;
+        if idx < len {
+            return Some((leaf, idx));
         }
+        // The cut is past this leaf's last key: start at the next leaf
+        // (never empty, being non-root).
+        let parts = layout::carve_leaf::<K, V>(leaf, &self.leaf_layout);
+        NonNull::new(*parts.next_ptr).map(|next| (next, 0))
     }
 
     /// Resolve the end bound to the position one past the last in-range item.
     unsafe fn resolve_back(&self, end: Bound<&K>) -> Option<(NonNull<u8>, usize)> {
-        match end {
-            Bound::Unbounded => {
-                let leaf = self.rightmost_leaf()?;
-                let parts = layout::carve_leaf::<K, V>(leaf, &self.leaf_layout);
-                let len = (*parts.hdr).len as usize;
-                if len == 0 {
-                    return None;
-                }
-                Some((leaf, len))
-            }
-            Bound::Included(k) | Bound::Excluded(k) => {
-                let excluded = matches!(end, Bound::Excluded(_));
-                let leaf = self.leaf_for_key(k)?;
-                let parts = layout::carve_leaf::<K, V>(leaf, &self.leaf_layout);
-                let len = (*parts.hdr).len as usize;
-                let keys = core::slice::from_raw_parts(parts.keys_ptr as *const K, len);
-                let idx = match keys.binary_search(k) {
-                    Ok(i) => {
-                        if excluded {
-                            i
-                        } else {
-                            i + 1
-                        }
-                    }
-                    Err(i) => i,
-                };
-                if idx > 0 {
-                    Some((leaf, idx))
-                } else {
-                    // End position is the boundary before this leaf: the end of
-                    // the previous leaf (never empty, being non-root).
-                    let prev = parts.prev_ptr.and_then(|p| NonNull::new(*p))?;
-                    let pp = layout::carve_leaf::<K, V>(prev, &self.leaf_layout);
-                    Some((prev, (*pp.hdr).len as usize))
-                }
-            }
+        let Some(k) = bound_key(end) else {
+            let leaf = self.rightmost_leaf()?;
+            let len = self.node_len(leaf);
+            return (len > 0).then_some((leaf, len));
+        };
+        // An included end keeps an exact match, so the cut sits after it.
+        let after_equal = matches!(end, Bound::Included(_));
+        let (leaf, idx, _) = self.cut_in_leaf(k, after_equal)?;
+        if idx > 0 {
+            return Some((leaf, idx));
         }
+        // The cut is before this leaf's first key: end at the end of the
+        // previous leaf (never empty, being non-root).
+        let parts = layout::carve_leaf::<K, V>(leaf, &self.leaf_layout);
+        let prev = parts.prev_ptr.and_then(|p| NonNull::new(*p))?;
+        Some((prev, self.node_len(prev)))
+    }
+
+    /// Find the leaf that would hold `k` and the index that cuts its keys
+    /// into those before `k` and those after. With `after_equal` an exact
+    /// match falls before the cut, otherwise after it. Returns
+    /// `(leaf, cut, len)`; the cut may equal 0 or `len`.
+    unsafe fn cut_in_leaf(&self, k: &K, after_equal: bool) -> Option<(NonNull<u8>, usize, usize)> {
+        let leaf = self.leaf_for_key(k)?;
+        let parts = layout::carve_leaf::<K, V>(leaf, &self.leaf_layout);
+        let len = (*parts.hdr).len as usize;
+        let keys = core::slice::from_raw_parts(parts.keys_ptr as *const K, len);
+        let cut = if after_equal {
+            keys.partition_point(|x| x <= k)
+        } else {
+            keys.partition_point(|x| x < k)
+        };
+        Some((leaf, cut, len))
     }
 
     fn make_items(&self, start: Bound<&K>, end: Bound<&K>) -> Items<'_, K, V> {
@@ -358,5 +335,13 @@ impl<K: Ord + Clone, V> BPlusTreeMap<K, V> {
                 &*(parts.vals_ptr.add(len - 1) as *const V),
             ))
         }
+    }
+}
+
+/// The key a bound is anchored on, or `None` for `Unbounded`.
+fn bound_key<T>(bound: Bound<&T>) -> Option<&T> {
+    match bound {
+        Bound::Included(k) | Bound::Excluded(k) => Some(k),
+        Bound::Unbounded => None,
     }
 }
