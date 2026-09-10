@@ -11,6 +11,30 @@ pub(crate) struct ValidationState<K> {
     pub(crate) prev_key: Option<K>,
 }
 
+/// Smallest and largest data key contained in a validated subtree.
+pub(crate) struct KeyRange<K> {
+    min: K,
+    max: K,
+}
+
+impl<K: Ord + Clone> ValidationState<K> {
+    /// Check this leaf's keys against the leaf visited immediately before it,
+    /// then make it the reference point for the next leaf in traversal order.
+    #[inline(always)]
+    fn observe_leaf(&mut self, leaf: NonNull<u8>, keys: &[K]) -> Result<(), String> {
+        self.prev_leaf = Some(leaf);
+
+        if let Some(prev_key) = &self.prev_key {
+            if keys[0] <= *prev_key {
+                return Err("Leaf keys not globally increasing".into());
+            }
+        }
+        self.prev_key = Some(keys[keys.len() - 1].clone());
+        self.total_items += keys.len();
+        Ok(())
+    }
+}
+
 impl<K, V> BPlusTreeMap<K, V> {
     /// Number of keys a node currently holds. The header is shared by both
     /// node kinds, so this works for leaves and branches alike.
@@ -360,7 +384,7 @@ impl<K: Ord + Clone, V> BPlusTreeMap<K, V> {
         upper: Option<&K>,
         is_root: bool,
         state: &mut ValidationState<K>,
-    ) -> Result<Option<(K, K)>, String> {
+    ) -> Result<Option<KeyRange<K>>, String> {
         let hdr = &*(node.as_ptr() as *const NodeHdr);
         match hdr.tag {
             NodeTag::Leaf => self.validate_leaf(node, lower, upper, is_root, state),
@@ -375,22 +399,32 @@ impl<K: Ord + Clone, V> BPlusTreeMap<K, V> {
         upper: Option<&K>,
         is_root: bool,
         state: &mut ValidationState<K>,
-    ) -> Result<Option<(K, K)>, String> {
+    ) -> Result<Option<KeyRange<K>>, String> {
         let parts = layout::carve_leaf::<K, V>(leaf, &self.leaf_layout);
-        let hdr = &*parts.hdr;
-        let len = hdr.len as usize;
-        let cap = self.leaf_layout.cap as usize;
+        let len = (*parts.hdr).len as usize;
+        self.validate_leaf_occupancy(len, is_root)?;
+        if len == 0 {
+            return Ok(None);
+        }
 
+        let keys = core::slice::from_raw_parts(parts.keys_ptr as *const K, len);
+        self.validate_leaf_key_order_and_bounds(keys, lower, upper)?;
+        self.validate_leaf_chain_position(leaf, parts.prev_ptr, state.prev_leaf)?;
+        state.observe_leaf(leaf, keys)?;
+
+        Ok(Some(KeyRange {
+            min: keys[0].clone(),
+            max: keys[len - 1].clone(),
+        }))
+    }
+
+    fn validate_leaf_occupancy(&self, len: usize, is_root: bool) -> Result<(), String> {
+        let cap = self.leaf_layout.cap as usize;
         if len > cap {
             return Err(format!("Leaf has {} keys but capacity is {}", len, cap));
         }
-
-        if len == 0 {
-            if is_root {
-                return Ok(None);
-            } else {
-                return Err("Non-root leaf is empty".into());
-            }
+        if len == 0 && !is_root {
+            return Err("Non-root leaf is empty".into());
         }
 
         let min_required = self.min_leaf_len();
@@ -400,9 +434,15 @@ impl<K: Ord + Clone, V> BPlusTreeMap<K, V> {
                 len, min_required
             ));
         }
+        Ok(())
+    }
 
-        let keys = core::slice::from_raw_parts(parts.keys_ptr as *const K, len);
-
+    fn validate_leaf_key_order_and_bounds(
+        &self,
+        keys: &[K],
+        lower: Option<&K>,
+        upper: Option<&K>,
+    ) -> Result<(), String> {
         for window in keys.windows(2) {
             if window[0] >= window[1] {
                 return Err("Leaf keys not strictly increasing".into());
@@ -415,20 +455,28 @@ impl<K: Ord + Clone, V> BPlusTreeMap<K, V> {
             }
         }
         if let Some(high) = upper {
-            if keys[len - 1] >= *high {
+            if keys[keys.len() - 1] >= *high {
                 return Err("Leaf keys exceed upper bound".into());
             }
         }
+        Ok(())
+    }
 
-        if let Some(prev_leaf) = state.prev_leaf {
+    unsafe fn validate_leaf_chain_position(
+        &self,
+        leaf: NonNull<u8>,
+        leaf_prev_ptr: Option<*mut *mut u8>,
+        expected_prev: Option<NonNull<u8>>,
+    ) -> Result<(), String> {
+        if let Some(prev_leaf) = expected_prev {
             let prev_next = *(prev_leaf.as_ptr().add(self.leaf_layout.next_off) as *const *mut u8);
             if prev_next != leaf.as_ptr() {
                 return Err("Leaf next pointer mismatch".into());
             }
         }
 
-        if let Some(prev_ptr) = parts.prev_ptr {
-            match state.prev_leaf {
+        if let Some(prev_ptr) = leaf_prev_ptr {
+            match expected_prev {
                 Some(prev) => {
                     if *prev_ptr != prev.as_ptr() {
                         return Err("Leaf prev pointer mismatch".into());
@@ -441,18 +489,7 @@ impl<K: Ord + Clone, V> BPlusTreeMap<K, V> {
                 }
             }
         }
-
-        state.prev_leaf = Some(leaf);
-
-        if let Some(prev_key) = &state.prev_key {
-            if keys[0] <= *prev_key {
-                return Err("Leaf keys not globally increasing".into());
-            }
-        }
-        state.prev_key = Some(keys[len - 1].clone());
-        state.total_items += len;
-
-        Ok(Some((keys[0].clone(), keys[len - 1].clone())))
+        Ok(())
     }
 
     pub(crate) unsafe fn validate_branch(
@@ -462,7 +499,7 @@ impl<K: Ord + Clone, V> BPlusTreeMap<K, V> {
         upper: Option<&K>,
         is_root: bool,
         state: &mut ValidationState<K>,
-    ) -> Result<Option<(K, K)>, String> {
+    ) -> Result<Option<KeyRange<K>>, String> {
         let parts = layout::carve_branch::<K>(branch, &self.branch_layout);
         let len = (*parts.hdr).len as usize;
         let cap = self.branch_layout.cap as usize;
@@ -520,8 +557,10 @@ impl<K: Ord + Clone, V> BPlusTreeMap<K, V> {
             let lower_bound = if i == 0 { lower } else { Some(&keys[i - 1]) };
             let upper_bound = if i == len { upper } else { Some(&keys[i]) };
 
-            if let Some((child_min, child_max)) =
-                self.validate_node(child, lower_bound, upper_bound, false, state)?
+            if let Some(KeyRange {
+                min: child_min,
+                max: child_max,
+            }) = self.validate_node(child, lower_bound, upper_bound, false, state)?
             {
                 if subtree_min.is_none() {
                     subtree_min = Some(child_min.clone());
@@ -531,7 +570,7 @@ impl<K: Ord + Clone, V> BPlusTreeMap<K, V> {
         }
 
         Ok(match (subtree_min, subtree_max) {
-            (Some(min), Some(max)) => Some((min, max)),
+            (Some(min), Some(max)) => Some(KeyRange { min, max }),
             _ => None,
         })
     }
