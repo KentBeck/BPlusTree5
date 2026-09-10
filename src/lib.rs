@@ -13,6 +13,8 @@ mod iterate;
 mod layout;
 mod node_alloc;
 
+#[cfg(feature = "delete_profile")]
+pub use delete::DeleteProfile;
 pub use iterate::{Items, Keys, Values};
 pub use layout::{align_up, BranchLayout, LeafLayout, NodeHdr, NodeTag};
 pub use node_alloc::{
@@ -30,6 +32,9 @@ pub struct BPlusTreeMap<K, V> {
 
     /// Number of key/value pairs stored in the leaves.
     entry_count: usize,
+
+    #[cfg(feature = "delete_profile")]
+    delete_profile: DeleteProfile,
 
     /// Fixed per-kind layouts computed from byte budgets and K/V sizes.
     leaf_layout: LeafLayout,
@@ -146,6 +151,8 @@ impl<K: Ord + Clone, V> BPlusTreeMap<K, V> {
         let mut tree = Self {
             root: None,
             entry_count: 0,
+            #[cfg(feature = "delete_profile")]
+            delete_profile: DeleteProfile::default(),
             leaf_layout,
             branch_layout,
             _marker: PhantomData,

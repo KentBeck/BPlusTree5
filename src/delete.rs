@@ -24,7 +24,36 @@ enum Rebalance {
     MergeWithRight,
 }
 
+/// Counts structural work performed by successful removals.
+///
+/// Available only with the `delete_profile` feature. Call
+/// [`BPlusTreeMap::reset_delete_profile`] after building a tree to isolate
+/// the removal phase.
+#[cfg(feature = "delete_profile")]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct DeleteProfile {
+    pub leaf_rebalance_checks: usize,
+    pub leaf_borrows: usize,
+    pub leaf_merges: usize,
+    pub branch_rebalance_checks: usize,
+    pub branch_borrows: usize,
+    pub branch_merges: usize,
+    pub leaf_deallocations: usize,
+    pub branch_deallocations: usize,
+    pub root_collapses: usize,
+}
+
 impl<K: Ord + Clone, V> BPlusTreeMap<K, V> {
+    #[cfg(feature = "delete_profile")]
+    pub fn delete_profile(&self) -> DeleteProfile {
+        self.delete_profile
+    }
+
+    #[cfg(feature = "delete_profile")]
+    pub fn reset_delete_profile(&mut self) {
+        self.delete_profile = DeleteProfile::default();
+    }
+
     pub fn remove(&mut self, key: &K) -> Option<V> {
         let root = self.root?;
         let value = unsafe { self.remove_rec(root, key) }?;
@@ -133,6 +162,11 @@ impl<K: Ord + Clone, V> BPlusTreeMap<K, V> {
     /// Free the old root branch and install `survivor` (or nothing) in its
     /// place.
     unsafe fn replace_root(&mut self, root: NonNull<u8>, survivor: Option<NonNull<u8>>) {
+        #[cfg(feature = "delete_profile")]
+        {
+            self.delete_profile.root_collapses += 1;
+        }
+
         // Unlike the merge paths, a collapsing root still owns its
         // separators: nothing moved them elsewhere.
         self.empty_branch(root);
@@ -168,12 +202,21 @@ impl<K: Ord + Clone, V> BPlusTreeMap<K, V> {
             "free_emptied_leaf called on a leaf that still holds items"
         );
         self.unlink_leaf(leaf);
+        #[cfg(feature = "delete_profile")]
+        {
+            self.delete_profile.leaf_deallocations += 1;
+        }
         free_leaf_block(leaf, &self.leaf_layout);
     }
 
     /// Append every item of `source` onto the end of `target`, leaving
     /// `source` empty. Bulk inverse of the leaf split's item move.
-    unsafe fn merge_leaf_into(&self, target: NonNull<u8>, source: NonNull<u8>) {
+    unsafe fn merge_leaf_into(&mut self, target: NonNull<u8>, source: NonNull<u8>) {
+        #[cfg(feature = "delete_profile")]
+        {
+            self.delete_profile.leaf_merges += 1;
+        }
+
         let t = layout::carve_leaf::<K, V>(target, &self.leaf_layout);
         let s = layout::carve_leaf::<K, V>(source, &self.leaf_layout);
 
@@ -204,7 +247,12 @@ impl<K: Ord + Clone, V> BPlusTreeMap<K, V> {
     /// The separator moves down to sit between target's old last child and
     /// source's first child (leaf merges drop it instead: leaf keys carry
     /// their own ordering).
-    unsafe fn merge_branch_into(&self, target: NonNull<u8>, separator: K, source: NonNull<u8>) {
+    unsafe fn merge_branch_into(&mut self, target: NonNull<u8>, separator: K, source: NonNull<u8>) {
+        #[cfg(feature = "delete_profile")]
+        {
+            self.delete_profile.branch_merges += 1;
+        }
+
         let t = layout::carve_branch::<K>(target, &self.branch_layout);
         let s = layout::carve_branch::<K>(source, &self.branch_layout);
 
@@ -264,6 +312,11 @@ impl<K: Ord + Clone, V> BPlusTreeMap<K, V> {
         child_idx: usize,
         branch_len: usize,
     ) {
+        #[cfg(feature = "delete_profile")]
+        {
+            self.delete_profile.leaf_rebalance_checks += 1;
+        }
+
         let min = self.min_leaf_len();
         match self.plan_rebalance(branch, child_idx, branch_len, min) {
             Rebalance::Keep => {}
@@ -281,6 +334,11 @@ impl<K: Ord + Clone, V> BPlusTreeMap<K, V> {
         child_idx: usize,
         branch_len: usize,
     ) {
+        #[cfg(feature = "delete_profile")]
+        {
+            self.delete_profile.branch_rebalance_checks += 1;
+        }
+
         let min = self.min_branch_len();
         match self.plan_rebalance(branch, child_idx, branch_len, min) {
             Rebalance::Keep => {}
@@ -340,6 +398,11 @@ impl<K: Ord + Clone, V> BPlusTreeMap<K, V> {
     /// travels with it. A pass-through: contrast the leaf rotations, which
     /// re-derive the separator from data.
     unsafe fn rotate_branch_right(&mut self, branch: NonNull<u8>, sep_idx: usize) {
+        #[cfg(feature = "delete_profile")]
+        {
+            self.delete_profile.branch_borrows += 1;
+        }
+
         let parts = layout::carve_branch::<K>(branch, &self.branch_layout);
         let children = parts.children_ptr as *mut *mut u8;
         let left = NonNull::new_unchecked(*children.add(sep_idx));
@@ -375,6 +438,11 @@ impl<K: Ord + Clone, V> BPlusTreeMap<K, V> {
     /// the old separator moves down as the left child's last key, and the
     /// right child's first subtree travels with it.
     unsafe fn rotate_branch_left(&mut self, branch: NonNull<u8>, sep_idx: usize) {
+        #[cfg(feature = "delete_profile")]
+        {
+            self.delete_profile.branch_borrows += 1;
+        }
+
         let parts = layout::carve_branch::<K>(branch, &self.branch_layout);
         let children = parts.children_ptr as *mut *mut u8;
         let left = NonNull::new_unchecked(*children.add(sep_idx));
@@ -431,6 +499,10 @@ impl<K: Ord + Clone, V> BPlusTreeMap<K, V> {
             0,
             "free_emptied_branch called on a branch that still holds separators"
         );
+        #[cfg(feature = "delete_profile")]
+        {
+            self.delete_profile.branch_deallocations += 1;
+        }
         free_branch_block(node, &self.branch_layout);
     }
 
@@ -450,6 +522,11 @@ impl<K: Ord + Clone, V> BPlusTreeMap<K, V> {
     /// the separator from the right child's new first key (contrast the
     /// branch rotations, which pass the separator through).
     unsafe fn rotate_leaf_right(&mut self, branch: NonNull<u8>, sep_idx: usize) {
+        #[cfg(feature = "delete_profile")]
+        {
+            self.delete_profile.leaf_borrows += 1;
+        }
+
         let parts = layout::carve_branch::<K>(branch, &self.branch_layout);
         let children = parts.children_ptr as *mut *mut u8;
         let left = NonNull::new_unchecked(*children.add(sep_idx));
@@ -483,6 +560,11 @@ impl<K: Ord + Clone, V> BPlusTreeMap<K, V> {
     /// the left child's last, and the separator is re-derived from the right
     /// child's new first key.
     unsafe fn rotate_leaf_left(&mut self, branch: NonNull<u8>, sep_idx: usize) {
+        #[cfg(feature = "delete_profile")]
+        {
+            self.delete_profile.leaf_borrows += 1;
+        }
+
         let parts = layout::carve_branch::<K>(branch, &self.branch_layout);
         let children = parts.children_ptr as *mut *mut u8;
         let left = NonNull::new_unchecked(*children.add(sep_idx));

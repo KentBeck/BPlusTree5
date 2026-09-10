@@ -15,6 +15,9 @@ path = "src/lib.rs"
 default = ["compat_test_api"]
 # Enables test-only compatibility APIs used by the imported test suites.
 compat_test_api = []
+# Adds per-map counters for diagnosing deletion repair work. Normal builds
+# contain neither the counters nor the instrumentation updates.
+delete_profile = []
 
 [profile.release]
 debug = true

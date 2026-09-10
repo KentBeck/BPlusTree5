@@ -48,7 +48,7 @@ Wins (keep these; do not regress):
 | Operation                          | vs std::BTreeMap |
 |------------------------------------|------------------|
 | get (random)                       | 1.9× faster      |
-| delete                             | 1.1× faster      |
+| delete (`with_caps(32, 256)`)      | 1.10× faster     |
 | mixed 50/30/20 ins/get/del         | 1.2× faster      |
 | full iteration (fwd and back)      | 3–5× faster      |
 | full-tree range scan               | 1.25× faster     |
@@ -59,6 +59,7 @@ Losses:
 
 | Operation                              | vs std::BTreeMap                 |
 |----------------------------------------|----------------------------------|
+| delete (`new(128)`)                    | 1.10× slower                     |
 | random insert                          | parity (bench_insert keys) to 1.4× slower (hash-scattered probe keys) |
 | single-item range seek / tiny cursors  | 1.1–1.2× slower (descent-bound) |
 
@@ -171,13 +172,25 @@ Whether `new()` should default to a split like this is an API-taste call
 for the author; the benches keep `new(128)` as the standard config, and
 `perf_probe` prints a `32/256` row alongside for comparison.
 
-### 6. Node allocation pooling (churn workloads)
+The same split also flips random deletion from a loss to a win. In 15
+interleaved one-million-key samples, `new(128)` was 1.10× slower than std
+while `with_caps(32, 256)` was 1.10× faster. `bench_delete` accepts both
+capacities and alternates which implementation runs first.
 
-Every split allocates via `alloc::alloc` and every merge deallocates
-(`node_alloc.rs`). A per-tree free list of node blocks (leaf and branch
-blocks are fixed-size, so this is a push/pop of raw pointers) removes malloc
-from the split/merge path. Helps insert and delete-heavy churn. Keep it
-bounded (e.g. 64 pooled nodes per kind) so memory doesn't grow monotonically.
+### 6. Delete repair diagnosis
+
+Feature-gated structural counters (`delete_profile`) show that allocation
+pooling is not the next lever. The faster 32/256 configuration performs
+44,760 leaf merges/deallocations per million removals, versus only 11,276
+at 128/128; it wins despite doing about four times as much allocator churn.
+
+The clearer target is the nearly unconditional repair check at each ancestor.
+Both configurations run about one leaf and one branch rebalance check per
+removal, but branch repairs are rare: 2,883 borrows/merges at 128/128 and
+11,234 at 32/256 per million removals. Have recursive deletion propagate an
+`underflow` result so parents skip `fix_branch_child` when the child remains
+full enough. Measure that as its own change before reconsidering a bounded
+node free list.
 
 ## P2 — smaller cleanups
 
