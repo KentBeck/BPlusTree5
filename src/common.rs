@@ -358,23 +358,27 @@ impl<K: Ord + Clone, V> BPlusTreeMap<K, V> {
         };
 
         unsafe {
-            match self.root {
-                None => Ok(()),
-                Some(root) => {
-                    self.validate_node(root, None, None, true, &mut state)?;
+            if let Some(root) = self.root {
+                self.validate_node(root, None, None, true, &mut state)?;
 
-                    if let Some(last_leaf) = state.prev_leaf {
-                        let next_ptr =
-                            *(last_leaf.as_ptr().add(self.leaf_layout.next_off) as *const *mut u8);
-                        if !next_ptr.is_null() {
-                            return Err("Tail leaf next pointer should be null".into());
-                        }
+                if let Some(last_leaf) = state.prev_leaf {
+                    let next_ptr =
+                        *(last_leaf.as_ptr().add(self.leaf_layout.next_off) as *const *mut u8);
+                    if !next_ptr.is_null() {
+                        return Err("Tail leaf next pointer should be null".into());
                     }
-
-                    Ok(())
                 }
             }
         }
+
+        if state.total_items != self.entry_count {
+            return Err(format!(
+                "Stored length is {}, but the leaf entry count is {}",
+                self.entry_count, state.total_items
+            ));
+        }
+
+        Ok(())
     }
 
     pub(crate) unsafe fn validate_node(
@@ -589,5 +593,23 @@ impl<K: Ord + Clone, V> BPlusTreeMap<K, V> {
         } else {
             cap / 2
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::BPlusTreeMap;
+
+    #[test]
+    fn validation_rejects_a_stale_entry_count() {
+        let mut tree = BPlusTreeMap::new(4).unwrap();
+        tree.insert(1, 10);
+
+        tree.entry_count += 1;
+
+        assert_eq!(
+            tree.check_invariants_detailed().unwrap_err(),
+            "Stored length is 2, but the leaf entry count is 1"
+        );
     }
 }

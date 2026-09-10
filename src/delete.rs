@@ -27,20 +27,23 @@ enum Rebalance {
 impl<K: Ord + Clone, V> BPlusTreeMap<K, V> {
     pub fn remove(&mut self, key: &K) -> Option<V> {
         let root = self.root?;
-        let result = unsafe { self.remove_rec(root, key) };
-        if result.is_some() {
-            // Only check root collapse if root is a branch with few children
-            // This avoids unnecessary checks when root is a leaf or has many children
-            unsafe {
-                if let Some(root) = self.root {
-                    let hdr = &*(root.as_ptr() as *const NodeHdr);
-                    if hdr.tag == NodeTag::Branch && (*hdr).len <= 2 {
-                        self.check_root_collapse();
-                    }
+        let value = unsafe { self.remove_rec(root, key) }?;
+
+        debug_assert!(self.entry_count > 0, "successful removal from an empty map");
+        self.entry_count -= 1;
+
+        // Only check root collapse if root is a branch with few children.
+        // This avoids unnecessary checks when root is a leaf or has many children.
+        unsafe {
+            if let Some(root) = self.root {
+                let hdr = &*(root.as_ptr() as *const NodeHdr);
+                if hdr.tag == NodeTag::Branch && (*hdr).len <= 2 {
+                    self.check_root_collapse();
                 }
             }
         }
-        result
+
+        Some(value)
     }
 
     /// Shrink a root branch that has at most two children down to its one

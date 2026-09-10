@@ -53,12 +53,12 @@ Wins (keep these; do not regress):
 | full iteration (fwd and back)      | 3–5× faster      |
 | full-tree range scan               | 1.25× faster     |
 | sequential (sorted) insert         | 1.2× faster      |
+| `len()` (1M items)                 | parity (~0.4 ns per call) |
 
 Losses:
 
 | Operation                              | vs std::BTreeMap                 |
 |----------------------------------------|----------------------------------|
-| `len()` (1M items)                     | O(n) vs O(1) (~0.4 ms per call)  |
 | random insert                          | parity (bench_insert keys) to 1.4× slower (hash-scattered probe keys) |
 | single-item range seek / tiny cursors  | 1.1–1.2× slower (descent-bound) |
 
@@ -69,23 +69,19 @@ get/iteration prefer the larger nodes. That tension motivates item 5.
 
 ## P0 — asymptotic bugs (large wins, low risk)
 
-### 1. `len()` is O(n) — decision pending (`is_empty()` now O(1))
+### 1. ~~`len()` is O(n)~~ — DONE
 
-`lib.rs` computes `len()` by walking the entire leaf linked list
-(~0.4 ms at 1M items; every other mainstream map is O(1)). `is_empty()` no
-longer pays this: the invariants (a branch root has children; non-root
-leaves are never empty) mean emptiness is decidable from the root header
-alone, so it is now O(1) and checked against std::BTreeMap by the fuzzer. The obvious fix —
-a cached `len: usize` maintained by insert/remove/clear and cross-checked by
-`check_invariants_detailed` so the fuzzer validates it on every mutation — is
-one the author is reluctant to take on (a denormalization plus a maintenance
-obligation in every mutation path).
+The map now stores `entry_count`, increments it only for a new key, decrements
+it only for a successful removal, and resets it in `clear()`. Both `len()` and
+`is_empty()` are simple reads of that count. `check_invariants_detailed`
+independently counts the entries in the leaves and rejects a stale stored
+count, so every differential-fuzz invariant check audits the bookkeeping.
 
-The cost profile if it stays O(n): any caller that consults `len()` per
-operation (capacity-eviction guards, per-tick metrics) goes quadratic;
-drain-until-empty loops are fine now that `is_empty()` is O(1), and
-`items()` no longer touches `len()` (done as part of item 3). If `len()`
-stays O(n), document it as such.
+Measured on a one-million-item tree: 10k `len()` calls fell from 3.56–3.70s
+(356–370 microseconds each) to 0.35–0.44ns each, matching std::BTreeMap—about
+a million-fold speedup. Interleaved million- and five-million-key mutation
+benchmarks found insertion, removal, and mixed-workload changes within the
+normal run-to-run spread.
 
 ### 2. ~~`first()` and `last()` in O(log n)~~ — DONE
 
@@ -100,8 +96,8 @@ first/last pairs went from 39s to 0.1ms — parity with std.
 The iterator now resolves both bounds to concrete (leaf, index) positions at
 construction and caches the current leaf's key/value pointers, so per-item
 work is an index compare and two pointer reads — no key comparisons, no
-re-carving, no bound-key clones. `items()` no longer calls the O(n) `len()`
-(the item-1 decoupling), `items_range()` is lazy instead of collecting a Vec
+re-carving, no bound-key clones. `items()` does not consult `len()`,
+`items_range()` is lazy instead of collecting a Vec
 (old item 8), and `next_back` got the same treatment (old item 7).
 
 The rewrite also fixed two latent double-ended-iteration bugs, now covered

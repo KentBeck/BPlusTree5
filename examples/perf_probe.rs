@@ -162,12 +162,22 @@ fn main() {
         acc = acc.wrapping_add(black_box(m.len()));
     }
     let dt = t0.elapsed().as_secs_f64();
-    println!("  bplustree     {:.4}s (acc {})", dt, acc);
+    println!(
+        "  bplustree     {:.4}s ({:.2} ns/call, acc {})",
+        dt,
+        dt * 1e9 / 10_000.0,
+        acc
+    );
     let t0 = Instant::now();
     let mut acc2 = 0usize;
     for _ in 0..10_000 {
         acc2 = acc2.wrapping_add(black_box(sm2.len()));
     }
     let dt = t0.elapsed().as_secs_f64();
-    println!("  std::BTreeMap {:.4}s (acc {})", dt, acc2);
+    println!(
+        "  std::BTreeMap {:.4}s ({:.2} ns/call, acc {})",
+        dt,
+        dt * 1e9 / 10_000.0,
+        acc2
+    );
 }

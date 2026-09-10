@@ -16,6 +16,14 @@ pub(crate) enum InsertResult<K, V> {
 
 impl<K: Ord + Clone, V> BPlusTreeMap<K, V> {
     pub fn insert(&mut self, key: K, value: V) -> Option<V> {
+        let old_value = self.insert_inner(key, value);
+        if old_value.is_none() {
+            self.entry_count += 1;
+        }
+        old_value
+    }
+
+    fn insert_inner(&mut self, key: K, value: V) -> Option<V> {
         // 64 levels is unreachable for any branch fanout >= 2.
         const MAX_DEPTH: usize = 64;
 

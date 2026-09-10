@@ -28,6 +28,9 @@ pub struct BPlusTreeMap<K, V> {
     /// Root node (points to a node header at offset 0), or None if empty.
     root: Option<NonNull<u8>>,
 
+    /// Number of key/value pairs stored in the leaves.
+    entry_count: usize,
+
     /// Fixed per-kind layouts computed from byte budgets and K/V sizes.
     leaf_layout: LeafLayout,
     branch_layout: BranchLayout,
@@ -142,6 +145,7 @@ impl<K: Ord + Clone, V> BPlusTreeMap<K, V> {
         let branch_layout = BranchLayout::compute_for_cap::<K>(branch_u16);
         let mut tree = Self {
             root: None,
+            entry_count: 0,
             leaf_layout,
             branch_layout,
             _marker: PhantomData,
@@ -155,40 +159,15 @@ impl<K: Ord + Clone, V> BPlusTreeMap<K, V> {
     }
 
     pub fn is_empty(&self) -> bool {
-        match self.root {
-            None => true,
-            Some(p) => unsafe {
-                let hdr = &*(p.as_ptr() as *const NodeHdr);
-                // A branch root always has at least one child and non-root
-                // leaves are never empty, so a branch root implies non-empty.
-                hdr.tag == NodeTag::Leaf && hdr.len == 0
-            },
-        }
+        self.entry_count == 0
     }
 
     pub fn len(&self) -> usize {
-        // Compute dynamically by walking the leaf linked list from the leftmost leaf
-        let mut total = 0usize;
-        let mut cur = match self.leftmost_leaf() {
-            Some(p) => p.as_ptr(),
-            None => core::ptr::null_mut(),
-        };
-        unsafe {
-            while !cur.is_null() {
-                let hdr = &*(cur as *const NodeHdr);
-                if hdr.tag != NodeTag::Leaf {
-                    break;
-                }
-                let parts =
-                    layout::carve_leaf::<K, V>(NonNull::new_unchecked(cur), &self.leaf_layout);
-                total += (*parts.hdr).len as usize;
-                cur = *parts.next_ptr;
-            }
-        }
-        total
+        self.entry_count
     }
 
     pub fn clear(&mut self) {
+        self.entry_count = 0;
         if let Some(root) = self.root.take() {
             unsafe {
                 self.drop_subtree(root);

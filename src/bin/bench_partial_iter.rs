@@ -17,13 +17,8 @@
 //!    - Tests iterator creation overhead for very small iterations
 //!    - Simulates database cursor operations or incremental data fetching
 //!
-//! ## Note on items()
-//!
-//! The "iterate from beginning" scenario using `items()` was removed because:
-//! - It calls `len()` internally, which walks all leaf nodes (O(n))
-//! - This makes it 1000x+ slower than std::BTreeMap for large datasets
-//! - Real-world applications should use `range(Bound::Unbounded..)` instead
-//! - The scenario was not representative of typical partial iteration use cases
+//! Full iteration is covered by `bench_iterate`; this benchmark concentrates
+//! on bounded work that starts from a key.
 
 use std::collections::BTreeMap;
 use std::env;

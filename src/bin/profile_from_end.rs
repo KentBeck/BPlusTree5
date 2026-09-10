@@ -156,7 +156,7 @@ fn main() {
     println!("  Total expected: count (16ms) + skip (160ms) + take (1ms) = ~177ms");
     println!();
     println!("The 'from end' scenario is slow because:");
-    println!("  1. count() calls len() which is O(n) - walks all leaves");
+    println!("  1. iter().count() visits every item");
     println!("  2. skip() calls next() n times, each walking through items");
     println!("  3. This is not a real-world use case - use range() instead");
 }
