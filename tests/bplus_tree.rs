@@ -528,7 +528,11 @@ fn test_root_promotion_leaf_to_branch() {
         tree.is_leaf_root(),
         "New tree should start with a leaf root"
     );
-    assert_eq!(tree.leaf_count(), 1, "New tree should have exactly 1 leaf");
+    assert_eq!(
+        tree.leaf_count(),
+        0,
+        "New tree allocates no leaf until the first insert"
+    );
 
     // Insert items one by one and track when root promotion occurs
     tree.insert(1, "value_1".to_string());
@@ -536,6 +540,7 @@ fn test_root_promotion_leaf_to_branch() {
         tree.is_leaf_root(),
         "Tree should still have leaf root after 1 item"
     );
+    assert_eq!(tree.leaf_count(), 1, "First insert allocates the root leaf");
 
     tree.insert(2, "value_2".to_string());
     assert!(

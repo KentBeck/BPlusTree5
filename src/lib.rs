@@ -205,7 +205,9 @@ impl<K: Ord + Clone, V> BPlusTreeMap<K, V> {
         let branch_u16 = core::cmp::min(branch_cap, u16::MAX as usize) as u16;
         let leaf_layout = LeafLayout::compute_for_cap::<K, V>(leaf_u16, true);
         let branch_layout = BranchLayout::compute_for_cap::<K>(branch_u16);
-        let mut tree = Self {
+        // The root leaf is allocated by the first insert, so an empty map
+        // costs nothing beyond its layouts.
+        Ok(Self {
             root: None,
             entry_count: 0,
             #[cfg(feature = "delete_profile")]
@@ -213,13 +215,7 @@ impl<K: Ord + Clone, V> BPlusTreeMap<K, V> {
             leaf_layout,
             branch_layout,
             _marker: PhantomData,
-        };
-        unsafe {
-            let leaf = alloc_leaf_block(&tree.leaf_layout)
-                .ok_or_else(|| BPlusTreeError::AllocationError("leaf root".into()))?;
-            tree.root = Some(leaf);
-        }
-        Ok(tree)
+        })
     }
 
     pub fn is_empty(&self) -> bool {

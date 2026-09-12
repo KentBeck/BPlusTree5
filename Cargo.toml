@@ -21,3 +21,6 @@ delete_profile = []
 
 [profile.release]
 debug = true
+
+[workspace]
+members = ["compat"]

@@ -13,7 +13,7 @@ fn test_empty_tree_leaf_count() {
     let count = tree.leaf_count();
     println!("Leaf count: {}", count);
 
-    assert_eq!(count, 1); // Empty tree should have 1 leaf
+    assert_eq!(count, 0); // The root leaf is allocated by the first insert
 }
 
 #[test]
