@@ -1,0 +1,125 @@
+diff --git a/Cargo.lock b/Cargo.lock
+index 613aa196..0efd0525 100644
+--- a/Cargo.lock
++++ b/Cargo.lock
+@@ -758,6 +758,18 @@ dependencies = [
+  "syn 2.0.117",
+ ]
+ 
++[[package]]
++name = "bplustree"
++version = "0.1.0"
++
++[[package]]
++name = "bplustree-compat"
++version = "0.1.0"
++dependencies = [
++ "bplustree",
++ "serde",
++]
++
+ [[package]]
+ name = "brotli"
+ version = "6.0.0"
+@@ -2995,6 +3007,7 @@ name = "deno_npm"
+ version = "0.70.0"
+ dependencies = [
+  "async-trait",
++ "bplustree-compat",
+  "bytemuck",
+  "capacity_builder",
+  "chrono",
+diff --git a/libs/npm/Cargo.toml b/libs/npm/Cargo.toml
+index d4c1c550..d2c3d9ee 100644
+--- a/libs/npm/Cargo.toml
++++ b/libs/npm/Cargo.toml
+@@ -19,6 +19,7 @@ tracing = []
+ 
+ [dependencies]
+ async-trait.workspace = true
++bplustree-compat = { path = "/home/user/BPlusTree5/compat", features = ["serde"] }
+ bytemuck = { workspace = true, features = ["aarch64_simd", "avx512_simd", "must_cast"] }
+ capacity_builder.workspace = true
+ chrono = { workspace = true, default-features = false, features = ["serde"] }
+diff --git a/libs/npm/lib.rs b/libs/npm/lib.rs
+index 463f8b9d..22350b07 100644
+--- a/libs/npm/lib.rs
++++ b/libs/npm/lib.rs
+@@ -5,7 +5,7 @@
+ #![deny(clippy::unused_async)]
+ 
+ use std::cmp::Ordering;
+-use std::collections::BTreeMap;
++use bplustree_compat::BTreeMap;
+ use std::collections::HashMap;
+ use std::collections::HashSet;
+ 
+diff --git a/libs/npm/resolution/common.rs b/libs/npm/resolution/common.rs
+index 85cb69c0..0d901e29 100644
+--- a/libs/npm/resolution/common.rs
++++ b/libs/npm/resolution/common.rs
+@@ -1,6 +1,6 @@
+ // Copyright 2018-2026 the Deno authors. MIT license.
+ 
+-use std::collections::BTreeSet;
++use bplustree_compat::BTreeSet;
+ use std::collections::HashMap;
+ use std::sync::Arc;
+ 
+diff --git a/libs/npm/resolution/graph.rs b/libs/npm/resolution/graph.rs
+index ff032b31..eb7c941a 100644
+--- a/libs/npm/resolution/graph.rs
++++ b/libs/npm/resolution/graph.rs
+@@ -3,7 +3,7 @@
+ use std::borrow::Cow;
+ use std::cell::Cell;
+ use std::cell::RefCell;
+-use std::collections::BTreeMap;
++use bplustree_compat::BTreeMap;
+ use std::collections::HashMap;
+ use std::collections::VecDeque;
+ use std::collections::hash_map::DefaultHasher;
+@@ -2285,7 +2285,7 @@ impl<'a, TNpmRegistryApi: NpmRegistryApi>
+       all_unresolved_optional_peers
+         .into_iter()
+         .filter(|name| should_bubble(name))
+-        .collect::<std::collections::BTreeSet<_>>()
++        .collect::<bplustree_compat::BTreeSet<_>>()
+         .into_iter()
+         .collect();
+ 
+@@ -3492,7 +3492,7 @@ fn build_trace_graph_snapshot(
+ 
+ #[cfg(test)]
+ mod test {
+-  use std::collections::BTreeSet;
++  use bplustree_compat::BTreeSet;
+   use std::collections::HashSet;
+   use std::sync::Arc;
+ 
+diff --git a/libs/npm/resolution/snapshot.rs b/libs/npm/resolution/snapshot.rs
+index 58d00dcc..17ed3ed9 100644
+--- a/libs/npm/resolution/snapshot.rs
++++ b/libs/npm/resolution/snapshot.rs
+@@ -1,7 +1,7 @@
+ // Copyright 2018-2026 the Deno authors. MIT license.
+ 
+-use std::collections::BTreeMap;
+-use std::collections::BTreeSet;
++use bplustree_compat::BTreeMap;
++use bplustree_compat::BTreeSet;
+ use std::collections::HashMap;
+ use std::collections::HashSet;
+ use std::collections::VecDeque;
+diff --git a/libs/npm/resolution/tracing/mod.rs b/libs/npm/resolution/tracing/mod.rs
+index 7eceb5a2..a0170c02 100644
+--- a/libs/npm/resolution/tracing/mod.rs
++++ b/libs/npm/resolution/tracing/mod.rs
+@@ -1,6 +1,6 @@
+ // Copyright 2018-2026 the Deno authors. MIT license.
+ 
+-use std::collections::BTreeMap;
++use bplustree_compat::BTreeMap;
+ 
+ use serde::Serialize;
+ 

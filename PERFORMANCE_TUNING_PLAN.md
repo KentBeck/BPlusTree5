@@ -211,6 +211,25 @@ Done in this change: `bench_insert` now defaults to cap=128 (was 16), and
 `with_cache_lines(2, 2)` ≈ 6-entry nodes, which made range look 2.5–3×
 worse than the tree actually is). Any future benchmark must use cap ≥ 64.
 
+## Field test: Deno's npm resolver (2026-09-12)
+
+`experiments/deno_npm/` swaps the tree into `deno_npm`, the one project
+among Materialize, Deno, Foundry, Biome, and SurrealDB whose core
+algorithm is genuinely built on `BTreeMap`. All 245 of its tests pass on
+the tree via the `bplustree-compat` shim (`compat/`). Its benchmarks show
+a consistent **loss**: 10–12% slower on the synthetic resolver, 4–7% on
+resolving `next@15.1.2`. Two lessons for this plan:
+
+- The maps in that host are tiny (a handful to ~100 entries, thousands of
+  them) and account for only 2–4% of its instructions. No ordered-map
+  swap can show a systemic win there; the leaf-size tuning above targets
+  the opposite regime (one map, a million keys).
+- In the tiny-map regime the losses are constant factors, not node size
+  (256-byte leaves did not help): the shim composes `entry`, `clone`, and
+  owned iteration from descents where std has single-node fast paths. If
+  the small-map regime ever matters, the levers are a native `entry`
+  API, a structural `clone`, and a draining `into_iter` in the library.
+
 ## Sequencing
 
 1. ~~Items 1 (decoupling), 2, 3, 7, 8~~ — done.
