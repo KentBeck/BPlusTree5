@@ -22,6 +22,25 @@ pub use node_alloc::{
     free_leaf_block, init_branch_block, init_leaf_block,
 };
 
+/// Leaf key/value bytes targeted by [`BPlusTreeMap::recommended`].
+pub const RECOMMENDED_LEAF_PAYLOAD_BYTES: usize = 512;
+
+/// Branch key/child-pointer bytes targeted by [`BPlusTreeMap::recommended`].
+pub const RECOMMENDED_BRANCH_PAYLOAD_BYTES: usize = 4 * 1024;
+
+const MIN_NODE_CAPACITY: usize = 4;
+
+/// Convert a payload target into a valid node capacity. Zero-sized slots can
+/// fill the payload without consuming bytes, so they use the format's largest
+/// representable capacity.
+fn capacity_for_payload(target_bytes: usize, bytes_per_slot: usize) -> usize {
+    if bytes_per_slot == 0 {
+        u16::MAX as usize
+    } else {
+        (target_bytes / bytes_per_slot).clamp(MIN_NODE_CAPACITY, u16::MAX as usize)
+    }
+}
+
 /// Raw-memory B+ tree map with fixed-size leaf and branch nodes.
 ///
 /// This type only defines the top-level container and precomputed layouts.
@@ -136,12 +155,45 @@ impl<K: Ord + Clone, V> BPlusTreeMap<K, V> {
         Self::with_caps(capacity, capacity)
     }
 
+    /// Construct with cache-oriented capacities derived from `K` and `V`.
+    ///
+    /// The targets are 512 bytes of keys and values per leaf and 4 KiB of
+    /// keys and child pointers per branch. On a 64-bit target,
+    /// `BPlusTreeMap<u64, u64>` gets leaf/branch capacities of 32/256. Larger
+    /// element types produce smaller capacities instead of silently creating
+    /// much larger nodes.
+    pub fn recommended() -> Result<Self, BPlusTreeError> {
+        Self::with_payload_targets(
+            RECOMMENDED_LEAF_PAYLOAD_BYTES,
+            RECOMMENDED_BRANCH_PAYLOAD_BYTES,
+        )
+    }
+
+    /// Construct from desired payload bytes rather than entry counts.
+    ///
+    /// A leaf slot is one `K` plus one `V`; a branch slot is one `K` plus one
+    /// child pointer. Node headers, sibling links, one extra branch child
+    /// pointer, and alignment padding sit outside these targets. Capacities
+    /// are clamped to the supported range of 4 through [`u16::MAX`], so a
+    /// target can be exceeded when four entries of a large type do not fit.
+    pub fn with_payload_targets(
+        leaf_payload_bytes: usize,
+        branch_payload_bytes: usize,
+    ) -> Result<Self, BPlusTreeError> {
+        let leaf_slot_bytes = core::mem::size_of::<K>().saturating_add(core::mem::size_of::<V>());
+        let branch_slot_bytes =
+            core::mem::size_of::<K>().saturating_add(core::mem::size_of::<*mut u8>());
+        let leaf_cap = capacity_for_payload(leaf_payload_bytes, leaf_slot_bytes);
+        let branch_cap = capacity_for_payload(branch_payload_bytes, branch_slot_bytes);
+        Self::with_caps(leaf_cap, branch_cap)
+    }
+
     /// Construct with independent leaf and branch capacities (entries per
     /// node). Inserts shift half a leaf on average, so smaller leaves make
     /// inserts cheaper, while larger branches keep the tree shallow for
     /// lookups; decoupling the two lets a workload pick both.
     pub fn with_caps(leaf_cap: usize, branch_cap: usize) -> Result<Self, BPlusTreeError> {
-        if leaf_cap < 4 || branch_cap < 4 {
+        if leaf_cap < MIN_NODE_CAPACITY || branch_cap < MIN_NODE_CAPACITY {
             return Err(BPlusTreeError::InvalidCapacity("capacity too small".into()));
         }
         let leaf_u16 = core::cmp::min(leaf_cap, u16::MAX as usize) as u16;

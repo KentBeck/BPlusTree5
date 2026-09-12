@@ -34,13 +34,15 @@ fn main() {
     }
     {
         let t0 = Instant::now();
-        let mut m = BPlusTreeMap::with_caps(32, 256).unwrap();
+        let mut m = BPlusTreeMap::recommended().unwrap();
+        let leaf_cap = m.leaf_layout().cap;
+        let branch_cap = m.branch_layout().cap;
         for &k in &keys {
             m.insert(k, k);
         }
         let dt = t0.elapsed().as_secs_f64();
         println!(
-            "  bplustree 32/256 {:.3}s ({:.2} Mops)",
+            "  bplustree recommended ({leaf_cap}/{branch_cap}) {:.3}s ({:.2} Mops)",
             dt,
             n as f64 / dt / 1e6
         );

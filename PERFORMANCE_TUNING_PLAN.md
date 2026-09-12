@@ -172,6 +172,13 @@ Whether `new()` should default to a split like this is an API-taste call
 for the author; the benches keep `new(128)` as the standard config, and
 `perf_probe` prints a `32/256` row alongside for comparison.
 
+`BPlusTreeMap::recommended()` now makes that split portable across types:
+it derives capacities from 512-byte leaf and 4-KiB branch payload targets.
+For `u64` keys and values on a 64-bit target this is 32/256; wider types
+automatically use fewer entries per node. `with_payload_targets` exposes the
+same calculation for callers with different cache or page-size goals, while
+`new(cap)` and `with_caps(leaf, branch)` retain their entry-count semantics.
+
 The same split also flips random deletion from a loss to a win. In 15
 interleaved one-million-key samples, `new(128)` was 1.10× slower than std
 while `with_caps(32, 256)` was 1.10× faster. `bench_delete` accepts both
@@ -184,13 +191,13 @@ pooling is not the next lever. The faster 32/256 configuration performs
 44,760 leaf merges/deallocations per million removals, versus only 11,276
 at 128/128; it wins despite doing about four times as much allocator churn.
 
-The clearer target is the nearly unconditional repair check at each ancestor.
-Both configurations run about one leaf and one branch rebalance check per
-removal, but branch repairs are rare: 2,883 borrows/merges at 128/128 and
-11,234 at 32/256 per million removals. Have recursive deletion propagate an
-`underflow` result so parents skip `fix_branch_child` when the child remains
-full enough. Measure that as its own change before reconsidering a bounded
-node free list.
+Recursive deletion now propagates whether its node underflowed, so parents
+skip `fix_branch_child` when the child remains full enough. Per million
+removals, leaf checks fell from about one million to 284,925 at 128/128 and
+354,367 at 32/256; branch checks fell from roughly one million to exactly the
+real repair counts, 2,883 and 11,234 respectively. Interleaved before/after
+runs preserved performance at 128/128 and improved the recommended 32/256
+configuration; allocation pooling remains unsupported by the evidence.
 
 ## P2 — smaller cleanups
 
