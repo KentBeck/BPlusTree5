@@ -1,4 +1,5 @@
 use core::borrow::Borrow;
+use core::marker::PhantomData;
 use core::ops::{Bound, RangeBounds};
 use core::ptr::NonNull;
 
@@ -25,10 +26,11 @@ pub struct Items<'a, K, V> {
     back_vals: *const V,
 }
 
-impl<'a, K: Ord, V> Iterator for Items<'a, K, V> {
-    type Item = (&'a K, &'a V);
-
-    fn next(&mut self) -> Option<Self::Item> {
+impl<'a, K: Ord, V> Items<'a, K, V> {
+    /// Step the front cursor, returning raw slot pointers. Both the shared
+    /// and the mutable iterator are built on this; the pointers carry the
+    /// node allocation's provenance, not that of any reference.
+    fn next_ptrs(&mut self) -> Option<(*const K, *mut V)> {
         loop {
             let leaf = self.front_leaf?;
             let same = leaf == self.back_leaf;
@@ -36,8 +38,8 @@ impl<'a, K: Ord, V> Iterator for Items<'a, K, V> {
 
             if self.front_idx < limit {
                 unsafe {
-                    let k = &*self.front_keys.add(self.front_idx);
-                    let v = &*self.front_vals.add(self.front_idx);
+                    let k = self.front_keys.add(self.front_idx);
+                    let v = self.front_vals.add(self.front_idx) as *mut V;
                     self.front_idx += 1;
                     return Some((k, v));
                 }
@@ -69,17 +71,8 @@ impl<'a, K: Ord, V> Iterator for Items<'a, K, V> {
         }
     }
 
-    fn size_hint(&self) -> (usize, Option<usize>) {
-        if self.front_leaf.is_none() {
-            (0, Some(0))
-        } else {
-            (0, None)
-        }
-    }
-}
-
-impl<'a, K: Ord, V> DoubleEndedIterator for Items<'a, K, V> {
-    fn next_back(&mut self) -> Option<<Self as Iterator>::Item> {
+    /// Step the back cursor; see [`Items::next_ptrs`].
+    fn next_back_ptrs(&mut self) -> Option<(*const K, *mut V)> {
         loop {
             let fleaf = self.front_leaf?;
             let same = fleaf == self.back_leaf;
@@ -88,8 +81,8 @@ impl<'a, K: Ord, V> DoubleEndedIterator for Items<'a, K, V> {
             if self.back_idx > lower {
                 unsafe {
                     self.back_idx -= 1;
-                    let k = &*self.back_keys.add(self.back_idx);
-                    let v = &*self.back_vals.add(self.back_idx);
+                    let k = self.back_keys.add(self.back_idx);
+                    let v = self.back_vals.add(self.back_idx) as *mut V;
                     return Some((k, v));
                 }
             }
@@ -118,6 +111,28 @@ impl<'a, K: Ord, V> DoubleEndedIterator for Items<'a, K, V> {
                 }
             }
         }
+    }
+}
+
+impl<'a, K: Ord, V> Iterator for Items<'a, K, V> {
+    type Item = (&'a K, &'a V);
+
+    fn next(&mut self) -> Option<Self::Item> {
+        self.next_ptrs().map(|(k, v)| unsafe { (&*k, &*v) })
+    }
+
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        if self.front_leaf.is_none() {
+            (0, Some(0))
+        } else {
+            (0, None)
+        }
+    }
+}
+
+impl<'a, K: Ord, V> DoubleEndedIterator for Items<'a, K, V> {
+    fn next_back(&mut self) -> Option<Self::Item> {
+        self.next_back_ptrs().map(|(k, v)| unsafe { (&*k, &*v) })
     }
 }
 
@@ -160,6 +175,60 @@ impl<'a, K: Ord, V> Iterator for Values<'a, K, V> {
 }
 
 impl<'a, K: Ord, V> DoubleEndedIterator for Values<'a, K, V> {
+    fn next_back(&mut self) -> Option<Self::Item> {
+        self.inner.next_back().map(|(_, v)| v)
+    }
+}
+
+/// Mutable-value counterpart of [`Items`].
+///
+/// The map is exclusively borrowed for `'a`, and the value pointers come
+/// from the node allocations rather than through any shared reference to
+/// the map, so handing out `&'a mut V` is sound.
+pub struct ItemsMut<'a, K, V> {
+    inner: Items<'a, K, V>,
+    _marker: PhantomData<&'a mut V>,
+}
+
+impl<'a, K: Ord, V> Iterator for ItemsMut<'a, K, V> {
+    type Item = (&'a K, &'a mut V);
+
+    fn next(&mut self) -> Option<Self::Item> {
+        self.inner
+            .next_ptrs()
+            .map(|(k, v)| unsafe { (&*k, &mut *v) })
+    }
+
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        self.inner.size_hint()
+    }
+}
+
+impl<'a, K: Ord, V> DoubleEndedIterator for ItemsMut<'a, K, V> {
+    fn next_back(&mut self) -> Option<Self::Item> {
+        self.inner
+            .next_back_ptrs()
+            .map(|(k, v)| unsafe { (&*k, &mut *v) })
+    }
+}
+
+pub struct ValuesMut<'a, K, V> {
+    inner: ItemsMut<'a, K, V>,
+}
+
+impl<'a, K: Ord, V> Iterator for ValuesMut<'a, K, V> {
+    type Item = &'a mut V;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        self.inner.next().map(|(_, v)| v)
+    }
+
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        self.inner.size_hint()
+    }
+}
+
+impl<'a, K: Ord, V> DoubleEndedIterator for ValuesMut<'a, K, V> {
     fn next_back(&mut self) -> Option<Self::Item> {
         self.inner.next_back().map(|(_, v)| v)
     }
@@ -311,6 +380,31 @@ impl<K: Ord + Clone, V> BPlusTreeMap<K, V> {
     pub fn values(&self) -> Values<'_, K, V> {
         Values {
             inner: self.items(),
+        }
+    }
+
+    pub fn items_mut(&mut self) -> ItemsMut<'_, K, V> {
+        ItemsMut {
+            inner: self.items(),
+            _marker: PhantomData,
+        }
+    }
+
+    pub fn values_mut(&mut self) -> ValuesMut<'_, K, V> {
+        ValuesMut {
+            inner: self.items_mut(),
+        }
+    }
+
+    pub fn range_mut<Q, R>(&mut self, r: R) -> ItemsMut<'_, K, V>
+    where
+        K: Borrow<Q>,
+        Q: Ord + ?Sized,
+        R: RangeBounds<Q>,
+    {
+        ItemsMut {
+            inner: self.make_items(r.start_bound(), r.end_bound()),
+            _marker: PhantomData,
         }
     }
 

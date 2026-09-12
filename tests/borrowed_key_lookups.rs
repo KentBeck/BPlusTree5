@@ -76,3 +76,24 @@ fn map_is_send_and_sync_when_contents_are() {
     let total: u32 = std::thread::scope(|s| s.spawn(|| map.values().sum()).join().unwrap());
     assert_eq!(total, 21);
 }
+
+#[test]
+fn mutable_iteration() {
+    let mut map = BPlusTreeMap::new(4).unwrap();
+    for i in 0..1000u32 {
+        map.insert(i, i);
+    }
+    for (k, v) in map.items_mut() {
+        *v += *k;
+    }
+    for v in map.values_mut().rev() {
+        *v += 1;
+    }
+    for (_, v) in map.range_mut(100..200) {
+        *v = 0;
+    }
+    assert_eq!(map.get(&5), Some(&11));
+    assert_eq!(map.get(&150), Some(&0));
+    assert_eq!(map.get(&999), Some(&1999));
+    assert!(map.check_invariants());
+}

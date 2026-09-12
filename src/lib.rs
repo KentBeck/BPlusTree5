@@ -15,7 +15,7 @@ mod node_alloc;
 
 #[cfg(feature = "delete_profile")]
 pub use delete::DeleteProfile;
-pub use iterate::{Items, Keys, Values};
+pub use iterate::{Items, ItemsMut, Keys, Values, ValuesMut};
 pub use layout::{align_up, BranchLayout, LeafLayout, NodeHdr, NodeTag};
 pub use node_alloc::{
     alloc_branch_block, alloc_leaf_block, alloc_raw, dealloc_raw, free_branch_block,
