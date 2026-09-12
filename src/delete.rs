@@ -17,11 +17,16 @@ enum RootChild {
 /// How to refill an underfull child, chosen by `plan_rebalance`.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 enum Rebalance {
-    Keep,
     BorrowFromLeft,
     BorrowFromRight,
     MergeWithLeft,
     MergeWithRight,
+}
+
+impl Rebalance {
+    fn merges_siblings(self) -> bool {
+        matches!(self, Self::MergeWithLeft | Self::MergeWithRight)
+    }
 }
 
 /// Counts structural work performed by successful removals.
@@ -56,7 +61,8 @@ impl<K: Ord + Clone, V> BPlusTreeMap<K, V> {
 
     pub fn remove(&mut self, key: &K) -> Option<V> {
         let root = self.root?;
-        let value = unsafe { self.remove_rec(root, key) }?;
+        let mut root_underflowed = false;
+        let value = unsafe { self.remove_rec(root, key, &mut root_underflowed) }?;
 
         debug_assert!(self.entry_count > 0, "successful removal from an empty map");
         self.entry_count -= 1;
@@ -280,78 +286,82 @@ impl<K: Ord + Clone, V> BPlusTreeMap<K, V> {
         (*s.hdr).len = 0;
     }
 
-    unsafe fn fix_branch_child(&mut self, branch: NonNull<u8>, child_idx: usize) {
+    /// Repair one known-underfull child. Returns whether repairing it made the
+    /// containing branch underfull in turn.
+    unsafe fn fix_branch_child(&mut self, branch: NonNull<u8>, child_idx: usize) -> bool {
         let parts = layout::carve_branch::<K>(branch, &self.branch_layout);
         let len = (*parts.hdr).len as usize;
         if len == 0 {
-            return;
+            return true;
         }
 
         let children = parts.children_ptr as *mut *mut u8;
         let idx = child_idx.min(len);
         let child_ptr = *children.add(idx);
         let Some(_) = NonNull::new(child_ptr) else {
-            return;
+            return len < self.min_branch_len();
         };
 
         let child_hdr = &*(child_ptr as *const NodeHdr);
-        match child_hdr.tag {
+        let branch_lost_child = match child_hdr.tag {
             NodeTag::Leaf => self.rebalance_leaf_child(branch, idx, len),
             NodeTag::Branch => self.rebalance_branch_child(branch, idx, len),
-        }
+        };
+        branch_lost_child && len - 1 < self.min_branch_len()
     }
 
     /// Restore minimum fill for `children[child_idx]` after a removal:
     /// borrow from a sibling that can spare an entry, else merge with one.
     /// `rebalance_branch_child` is its structural twin; both defer the
     /// decision to `plan_rebalance` and only supply the leaf or branch
-    /// flavour of each repair.
+    /// flavour of each repair. Returns whether the repair merged two children
+    /// and therefore removed one entry from their parent branch.
     unsafe fn rebalance_leaf_child(
         &mut self,
         branch: NonNull<u8>,
         child_idx: usize,
         branch_len: usize,
-    ) {
+    ) -> bool {
         #[cfg(feature = "delete_profile")]
         {
             self.delete_profile.leaf_rebalance_checks += 1;
         }
 
-        let min = self.min_leaf_len();
-        match self.plan_rebalance(branch, child_idx, branch_len, min) {
-            Rebalance::Keep => {}
+        let repair = self.plan_rebalance(branch, child_idx, branch_len, self.min_leaf_len());
+        match repair {
             Rebalance::BorrowFromLeft => self.rotate_leaf_right(branch, child_idx - 1),
             Rebalance::BorrowFromRight => self.rotate_leaf_left(branch, child_idx),
             Rebalance::MergeWithLeft => self.merge_leaf_pair(branch, child_idx - 1),
             Rebalance::MergeWithRight => self.merge_leaf_pair(branch, child_idx),
         }
+        repair.merges_siblings()
     }
 
-    /// Structural twin of `rebalance_leaf_child`.
+    /// Structural twin of `rebalance_leaf_child`, with the same merge result.
     unsafe fn rebalance_branch_child(
         &mut self,
         branch: NonNull<u8>,
         child_idx: usize,
         branch_len: usize,
-    ) {
+    ) -> bool {
         #[cfg(feature = "delete_profile")]
         {
             self.delete_profile.branch_rebalance_checks += 1;
         }
 
-        let min = self.min_branch_len();
-        match self.plan_rebalance(branch, child_idx, branch_len, min) {
-            Rebalance::Keep => {}
+        let repair = self.plan_rebalance(branch, child_idx, branch_len, self.min_branch_len());
+        match repair {
             Rebalance::BorrowFromLeft => self.rotate_branch_right(branch, child_idx - 1),
             Rebalance::BorrowFromRight => self.rotate_branch_left(branch, child_idx),
             Rebalance::MergeWithLeft => self.merge_branch_pair(branch, child_idx - 1),
             Rebalance::MergeWithRight => self.merge_branch_pair(branch, child_idx),
         }
+        repair.merges_siblings()
     }
 
-    /// Decide how to refill `children[child_idx]` when it has dropped below
-    /// `min`: prefer borrowing from a sibling that holds more than `min`
-    /// (left first), else merge with the left sibling, else the right.
+    /// Decide how to refill the underfull `children[child_idx]`: prefer
+    /// borrowing from a sibling that holds more than `min` (left first),
+    /// else merge with the left sibling, else the right.
     /// Null siblings can occur at the root while `check_root_collapse` is
     /// mid-repair; they can never lend, but the merge fallback assumes the
     /// chosen neighbour is present, as it always is below the root.
@@ -368,9 +378,7 @@ impl<K: Ord + Clone, V> BPlusTreeMap<K, V> {
         let has_right = child_idx < branch_len;
 
         let child = NonNull::new_unchecked(*children.add(child_idx));
-        if self.node_len(child) >= min {
-            return Rebalance::Keep;
-        }
+        debug_assert!(self.node_len(child) < min, "child must be underfull");
         if has_left && self.child_len(children, child_idx - 1) > min {
             return Rebalance::BorrowFromLeft;
         }
@@ -380,10 +388,8 @@ impl<K: Ord + Clone, V> BPlusTreeMap<K, V> {
         if has_left {
             return Rebalance::MergeWithLeft;
         }
-        if has_right {
-            return Rebalance::MergeWithRight;
-        }
-        Rebalance::Keep
+        debug_assert!(has_right, "a child in a nonempty branch has a sibling");
+        Rebalance::MergeWithRight
     }
 
     /// Length of `children[idx]`, or 0 for a null slot.
@@ -625,17 +631,27 @@ impl<K: Ord + Clone, V> BPlusTreeMap<K, V> {
         separator
     }
 
-    unsafe fn remove_rec(&mut self, node: NonNull<u8>, key: &K) -> Option<V> {
+    /// Remove below `node`; on success, also report whether `node` became
+    /// underfull and therefore needs repair by its parent.
+    unsafe fn remove_rec(
+        &mut self,
+        node: NonNull<u8>,
+        key: &K,
+        node_underflowed: &mut bool,
+    ) -> Option<V> {
         let hdr = &*(node.as_ptr() as *const NodeHdr);
         match hdr.tag {
-            NodeTag::Leaf => self.leaf_remove(node, key),
+            NodeTag::Leaf => {
+                let value = self.leaf_remove(node, key)?;
+                *node_underflowed = self.node_len(node) < self.min_leaf_len();
+                Some(value)
+            }
             NodeTag::Branch => {
                 let (child, idx) = self.child_for_key(node, key)?;
-                let result = self.remove_rec(child, key);
-                if result.is_some() {
-                    self.fix_branch_child(node, idx);
-                }
-                result
+                let mut child_underflowed = false;
+                let value = self.remove_rec(child, key, &mut child_underflowed)?;
+                *node_underflowed = child_underflowed && self.fix_branch_child(node, idx);
+                Some(value)
             }
         }
     }
