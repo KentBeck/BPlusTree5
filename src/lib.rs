@@ -62,6 +62,11 @@ pub struct BPlusTreeMap<K, V> {
     _marker: PhantomData<(K, V)>,
 }
 
+// The map owns its nodes outright; the raw pointers are never shared with
+// anything outside the map, so it is exactly as thread-safe as its contents.
+unsafe impl<K: Send, V: Send> Send for BPlusTreeMap<K, V> {}
+unsafe impl<K: Sync, V: Sync> Sync for BPlusTreeMap<K, V> {}
+
 impl<K, V> Drop for BPlusTreeMap<K, V> {
     fn drop(&mut self) {
         if let Some(root) = self.root.take() {

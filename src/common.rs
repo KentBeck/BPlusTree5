@@ -1,5 +1,6 @@
 use alloc::format;
 use alloc::string::String;
+use core::borrow::Borrow;
 use core::ptr::NonNull;
 
 use crate::layout;
@@ -86,12 +87,12 @@ impl<K, V> BPlusTreeMap<K, V> {
     /// Centralized binary search for keys in a node.
     /// This function will be optimized for performance in future iterations.
     #[inline(always)]
-    pub(crate) fn binary_search_keys<T: Ord>(
-        &self,
-        keys: &[T],
-        target: &T,
-    ) -> Result<usize, usize> {
-        keys.binary_search(target)
+    pub(crate) fn binary_search_keys<T, Q>(&self, keys: &[T], target: &Q) -> Result<usize, usize>
+    where
+        T: Borrow<Q>,
+        Q: Ord + ?Sized,
+    {
+        keys.binary_search_by(|k| k.borrow().cmp(target))
     }
 
     /// Bulk-move `count` key/value pairs from one node's arrays to another's.
@@ -238,11 +239,15 @@ impl<K, V> BPlusTreeMap<K, V> {
 
 impl<K: Ord, V> BPlusTreeMap<K, V> {
     #[inline(always)]
-    pub(crate) unsafe fn child_for_key(
+    pub(crate) unsafe fn child_for_key<Q>(
         &self,
         branch: NonNull<u8>,
-        key: &K,
-    ) -> Option<(NonNull<u8>, usize)> {
+        key: &Q,
+    ) -> Option<(NonNull<u8>, usize)>
+    where
+        K: Borrow<Q>,
+        Q: Ord + ?Sized,
+    {
         let parts = layout::carve_branch::<K>(branch, &self.branch_layout);
         let len = (*parts.hdr).len as usize;
         let keys = core::slice::from_raw_parts(parts.keys_ptr as *const K, len);
@@ -255,7 +260,11 @@ impl<K: Ord, V> BPlusTreeMap<K, V> {
     }
 
     #[inline(always)]
-    pub(crate) fn leaf_for_key(&self, key: &K) -> Option<NonNull<u8>> {
+    pub(crate) fn leaf_for_key<Q>(&self, key: &Q) -> Option<NonNull<u8>>
+    where
+        K: Borrow<Q>,
+        Q: Ord + ?Sized,
+    {
         let mut cur = self.root?;
         unsafe {
             loop {

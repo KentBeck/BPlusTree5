@@ -1,3 +1,4 @@
+use core::borrow::Borrow;
 use core::ops::{Bound, RangeBounds};
 use core::ptr::NonNull;
 
@@ -181,7 +182,11 @@ impl<K: Ord + Clone, V> BPlusTreeMap<K, V> {
     }
 
     /// Resolve the start bound to the position of the first in-range item.
-    unsafe fn resolve_front(&self, start: Bound<&K>) -> Option<(NonNull<u8>, usize)> {
+    unsafe fn resolve_front<Q>(&self, start: Bound<&Q>) -> Option<(NonNull<u8>, usize)>
+    where
+        K: Borrow<Q>,
+        Q: Ord + ?Sized,
+    {
         let Some(k) = bound_key(start) else {
             let leaf = self.leftmost_leaf()?;
             // Only a root leaf can be empty, and it has no siblings.
@@ -200,7 +205,11 @@ impl<K: Ord + Clone, V> BPlusTreeMap<K, V> {
     }
 
     /// Resolve the end bound to the position one past the last in-range item.
-    unsafe fn resolve_back(&self, end: Bound<&K>) -> Option<(NonNull<u8>, usize)> {
+    unsafe fn resolve_back<Q>(&self, end: Bound<&Q>) -> Option<(NonNull<u8>, usize)>
+    where
+        K: Borrow<Q>,
+        Q: Ord + ?Sized,
+    {
         let Some(k) = bound_key(end) else {
             let leaf = self.rightmost_leaf()?;
             let len = self.node_len(leaf);
@@ -223,20 +232,28 @@ impl<K: Ord + Clone, V> BPlusTreeMap<K, V> {
     /// into those before `k` and those after. With `after_equal` an exact
     /// match falls before the cut, otherwise after it. Returns
     /// `(leaf, cut, len)`; the cut may equal 0 or `len`.
-    unsafe fn cut_in_leaf(&self, k: &K, after_equal: bool) -> Option<(NonNull<u8>, usize, usize)> {
+    unsafe fn cut_in_leaf<Q>(&self, k: &Q, after_equal: bool) -> Option<(NonNull<u8>, usize, usize)>
+    where
+        K: Borrow<Q>,
+        Q: Ord + ?Sized,
+    {
         let leaf = self.leaf_for_key(k)?;
         let parts = layout::carve_leaf::<K, V>(leaf, &self.leaf_layout);
         let len = (*parts.hdr).len as usize;
         let keys = core::slice::from_raw_parts(parts.keys_ptr as *const K, len);
         let cut = if after_equal {
-            keys.partition_point(|x| x <= k)
+            keys.partition_point(|x| x.borrow() <= k)
         } else {
-            keys.partition_point(|x| x < k)
+            keys.partition_point(|x| x.borrow() < k)
         };
         Some((leaf, cut, len))
     }
 
-    fn make_items(&self, start: Bound<&K>, end: Bound<&K>) -> Items<'_, K, V> {
+    fn make_items<Q>(&self, start: Bound<&Q>, end: Bound<&Q>) -> Items<'_, K, V>
+    where
+        K: Borrow<Q>,
+        Q: Ord + ?Sized,
+    {
         unsafe {
             let (front_leaf, front_idx) = match self.resolve_front(start) {
                 Some(pos) => pos,
@@ -255,7 +272,7 @@ impl<K: Ord + Clone, V> BPlusTreeMap<K, V> {
             // bound; if that key violates the end bound the range is empty
             // (this also covers inverted bounds). Otherwise the front
             // position is strictly before the back position.
-            let first_key = &*front_keys.add(front_idx);
+            let first_key: &Q = (*front_keys.add(front_idx)).borrow();
             let in_range = match end {
                 Bound::Unbounded => true,
                 Bound::Included(e) => first_key <= e,
@@ -303,7 +320,12 @@ impl<K: Ord + Clone, V> BPlusTreeMap<K, V> {
         self.make_items(sb, eb)
     }
 
-    pub fn range<R: RangeBounds<K>>(&self, r: R) -> Items<'_, K, V> {
+    pub fn range<Q, R>(&self, r: R) -> Items<'_, K, V>
+    where
+        K: Borrow<Q>,
+        Q: Ord + ?Sized,
+        R: RangeBounds<Q>,
+    {
         self.make_items(r.start_bound(), r.end_bound())
     }
 
@@ -339,7 +361,7 @@ impl<K: Ord + Clone, V> BPlusTreeMap<K, V> {
 }
 
 /// The key a bound is anchored on, or `None` for `Unbounded`.
-fn bound_key<T>(bound: Bound<&T>) -> Option<&T> {
+fn bound_key<T: ?Sized>(bound: Bound<&T>) -> Option<&T> {
     match bound {
         Bound::Included(k) | Bound::Excluded(k) => Some(k),
         Bound::Unbounded => None,

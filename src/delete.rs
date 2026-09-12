@@ -1,6 +1,7 @@
 use crate::{
     free_branch_block, free_leaf_block, layout, BPlusTreeError, BPlusTreeMap, NodeHdr, NodeTag,
 };
+use core::borrow::Borrow;
 use core::ptr::{self, NonNull};
 
 /// What became of one root child during a root collapse.
@@ -59,7 +60,11 @@ impl<K: Ord + Clone, V> BPlusTreeMap<K, V> {
         self.delete_profile = DeleteProfile::default();
     }
 
-    pub fn remove(&mut self, key: &K) -> Option<V> {
+    pub fn remove<Q>(&mut self, key: &Q) -> Option<V>
+    where
+        K: Borrow<Q>,
+        Q: Ord + ?Sized,
+    {
         let root = self.root?;
         let mut root_underflowed = false;
         let value = unsafe { self.remove_rec(root, key, &mut root_underflowed) }?;
@@ -633,12 +638,16 @@ impl<K: Ord + Clone, V> BPlusTreeMap<K, V> {
 
     /// Remove below `node`; on success, also report whether `node` became
     /// underfull and therefore needs repair by its parent.
-    unsafe fn remove_rec(
+    unsafe fn remove_rec<Q>(
         &mut self,
         node: NonNull<u8>,
-        key: &K,
+        key: &Q,
         node_underflowed: &mut bool,
-    ) -> Option<V> {
+    ) -> Option<V>
+    where
+        K: Borrow<Q>,
+        Q: Ord + ?Sized,
+    {
         let hdr = &*(node.as_ptr() as *const NodeHdr);
         match hdr.tag {
             NodeTag::Leaf => {
@@ -656,7 +665,11 @@ impl<K: Ord + Clone, V> BPlusTreeMap<K, V> {
         }
     }
 
-    unsafe fn leaf_remove(&mut self, leaf: NonNull<u8>, key: &K) -> Option<V> {
+    unsafe fn leaf_remove<Q>(&mut self, leaf: NonNull<u8>, key: &Q) -> Option<V>
+    where
+        K: Borrow<Q>,
+        Q: Ord + ?Sized,
+    {
         let parts = layout::carve_leaf::<K, V>(leaf, &self.leaf_layout);
         let len = (*parts.hdr).len as usize;
         let keys = core::slice::from_raw_parts(parts.keys_ptr as *const K, len);
@@ -684,7 +697,11 @@ impl<K: Ord + Clone, V> BPlusTreeMap<K, V> {
         Some(value)
     }
 
-    pub fn remove_item(&mut self, key: &K) -> Result<V, BPlusTreeError> {
+    pub fn remove_item<Q>(&mut self, key: &Q) -> Result<V, BPlusTreeError>
+    where
+        K: Borrow<Q>,
+        Q: Ord + ?Sized,
+    {
         self.remove(key).ok_or(BPlusTreeError::KeyNotFound)
     }
 }
