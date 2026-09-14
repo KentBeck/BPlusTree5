@@ -71,9 +71,9 @@ A branch is "first child plus (separator, child) entries", which is the
 entry view `branch_insert_and_split` already uses. Port each Rust
 function one-to-one, same name, same arithmetic:
 
-- `leaf_insert_or_split`: `left_count = (len + 1) / 2`, `left_keep`
-  adjusted by whether the insert lands left, new separator is the right
-  leaf's first key.
+- `split_leaf` then the ordinary insert: the left half keeps
+  `(len + 1) / 2` items, the separator is the right half's first key, and
+  the new entry goes to whichever half the separator routes it to.
 - `branch_insert_and_split`: same `left_count`/`left_keep`, then promote
   the right node's first entry; its key goes up, its child becomes the
   right node's `c0`.
@@ -169,13 +169,16 @@ In this order, because difficulty rises sharply:
 2. `insert` including root growth. Key lemmas, all `omega` once the
    model is right, for every `cap ≥ 4`:
    - ~~leaf split~~ — DONE (`lean/BPlusTree/Proofs/Leaf.lean`).
-     `leafSplit_eq` shows the two `left_keep` cases both equal "insert,
-     then cut at `(len + 1) / 2`"; `leafInsertOrSplit_split` gives both
-     halves sorted with `cap / 2 ≤ len ≤ cap`, the separator bounding
-     both sides, and the halves concatenating to the inserted list;
-     `leafInsertOrSplit_noSplit` covers the absorb and overwrite arms.
-     The split theorem needs `cap ≥ 1` (omega produced the `cap = 0`
-     counterexample); `with_caps` enforces 4.
+     The Rust now splits a full leaf first and then runs the ordinary
+     insert on the half the separator routes the key to, so the model's
+     `leafSplit` is a `take`/`drop` at `(len + 1) / 2` and the old
+     `left_keep` case analysis (and its equivalence theorem) are gone.
+     `leafInsertOrSplit_split` gives both halves sorted with
+     `cap / 2 ≤ len ≤ cap`, the separator bounding both sides, and the
+     halves concatenating to the inserted list; `leafInsertOrSplit_noSplit`
+     covers the absorb and overwrite arms. The split theorem needs
+     `cap ≥ 2` (a one-item leaf would split into an empty right half,
+     and the Rust reads its first key); `with_caps` enforces 4.
    - branch split: after promotion both sides hold `≥ cap / 2` keys.
 3. `range` bound resolution: `cut_in_leaf` with `after_equal`, the
    hop to the next/previous leaf when the cut sits at an edge, and the
@@ -226,6 +229,14 @@ a decision on; each is either a theorem or a code change.
    proves it; adding the check to the Rust validator is Phase 5.3.
 4. **`min_branch_len`'s `cap <= 2` arm is dead** since `with_caps`
    rejects capacities below 4. Delete it.
+5. **Branch split cannot be split-first.** Leaves can split before
+   inserting because no key leaves the leaf. A branch promotes one key,
+   so a full branch with an even `cap` splits into `cap / 2 - 1` and
+   `cap / 2` keys, and the smaller side is below `min_branch_len` unless
+   the incoming entry happens to land there. The fused arithmetic in
+   `branch_insert_and_split` (choose the promotion point knowing where
+   the new entry goes) is what keeps both sides at `≥ cap / 2`. The
+   theorem to prove is that fused arithmetic, not a simpler replacement.
 
 ## Open decisions
 

@@ -47,50 +47,22 @@ theorem getElem?_append_length (A B : List α) : (A ++ B)[A.length]? = B.head? :
   rw [List.getElem?_append_right (Nat.le_refl _), Nat.sub_self]
   cases B <;> rfl
 
-/-! ## The split arithmetic
+/-! ## The split
 
-`leafSplit` computes with `left_keep` in two cases. Both cases produce the
-same thing: insert the new item, then cut the result at `(len + 1) / 2`.
-This is the theorem behind the comment "`left_count` is the final left
-size" in `src/insert.rs`.
+`split_leaf` cuts a full leaf at `(len + 1) / 2`, so both halves hold at
+least `len / 2` items whichever half then receives the new one.
 -/
 
-theorem leafSplit_append (A B : List α) (x : α) :
-    leafSplit (A ++ B) A.length x =
-      ((A ++ x :: B).take ((A.length + B.length + 1) / 2),
-       (A ++ x :: B).drop ((A.length + B.length + 1) / 2)) := by
-  unfold leafSplit
-  simp only [List.length_append]
-  split
-  · -- The new item lands on the left: `left_keep = left_count - 1`.
-    rename_i hlt
-    have hk : A.length ≤ (A.length + B.length + 1) / 2 - 1 := by omega
-    have hk' : A.length ≤ (A.length + B.length + 1) / 2 := by omega
-    have e1 : (A.length + B.length + 1) / 2 - A.length =
-        ((A.length + B.length + 1) / 2 - 1 - A.length) + 1 := by omega
-    simp only [List.take_append, List.drop_append, List.take_of_length_le hk,
-      List.take_of_length_le hk', List.drop_of_length_le hk, List.drop_of_length_le hk',
-      List.nil_append, insertAt_append]
-    rw [e1, List.take_succ_cons, List.drop_succ_cons]
-  · -- The new item lands on the right: `left_keep = left_count`.
-    rename_i hge
-    have e0 : (A.length + B.length + 1) / 2 - A.length = 0 := by omega
-    have hl : (A.drop ((A.length + B.length + 1) / 2)).length =
-        A.length - (A.length + B.length + 1) / 2 := by simp
-    simp only [List.take_append, List.drop_append, e0, List.take_zero, List.drop_zero,
-      List.append_nil]
-    rw [← hl, insertAt_append]
+theorem leafSplit_fst_length (leaf : List α) :
+    (leafSplit leaf).1.length = (leaf.length + 1) / 2 := by
+  simp [leafSplit]; omega
 
-theorem leafSplit_eq (leaf : List α) (idx : Nat) (x : α) (h : idx ≤ leaf.length) :
-    leafSplit leaf idx x =
-      ((insertAt leaf idx x).take ((leaf.length + 1) / 2),
-       (insertAt leaf idx x).drop ((leaf.length + 1) / 2)) := by
-  have hA : (leaf.take idx).length = idx := by simp; omega
-  have this := leafSplit_append (leaf.take idx) (leaf.drop idx) x
-  rw [List.take_append_drop, hA, List.length_drop] at this
-  rw [this, insertAt]
-  have e : idx + (leaf.length - idx) + 1 = leaf.length + 1 := by omega
-  rw [e]
+theorem leafSplit_snd_length (leaf : List α) :
+    (leafSplit leaf).2.length = leaf.length - (leaf.length + 1) / 2 := by
+  simp [leafSplit]
+
+theorem leafSplit_append (leaf : List α) : (leafSplit leaf).1 ++ (leafSplit leaf).2 = leaf :=
+  List.take_append_drop _ _
 
 /-! ## Order facts about `lowerBound` -/
 
@@ -156,6 +128,14 @@ theorem forall_gt_of_head_gt {e : K × V} {B : Leaf K V} {k : K}
 
 /-! ## `leaf_insert_or_split` -/
 
+/-- The split arm never reports `NoSplit`. -/
+theorem leafSplitInsert_ne_noSplit (leaf : Leaf K V) (idx : Nat) (k : K) (v : V)
+    (leaf' : Leaf K V) (old : Option V) :
+    leafSplitInsert leaf idx k v ≠ .noSplit leaf' old := by
+  intro h
+  simp only [leafSplitInsert] at h
+  split at h <;> (try split at h) <;> cases h
+
 /-- The `NoSplit` outcome: the leaf stays sorted, stays within capacity,
 and grows by exactly one entry when the key was absent or not at all when
 it was present (in which case the returned value was the one stored). -/
@@ -183,7 +163,7 @@ theorem leafInsertOrSplit_noSplit {cap : Nat} {leaf leaf' : Leaf K V} {k : K} {v
       · intro _
         refine ⟨?_, by simp <;> omega⟩
         intro e he; exact ne_of_lt (hA e (by simpa using he))
-    · cases h
+    · exact absurd h (leafSplitInsert_ne_noSplit _ _ _ _ _ _)
   | cons e B =>
     simp only [List.head?_cons] at h
     split at h
@@ -203,7 +183,7 @@ theorem leafInsertOrSplit_noSplit {cap : Nat} {leaf leaf' : Leaf K V} {k : K} {v
           rcases List.mem_append.mp hx with hx | hx
           · exact ne_of_lt (hA x hx)
           · exact (ne_of_lt (hgt x hx)).symm
-      · cases h
+      · exact absurd h (leafSplitInsert_ne_noSplit _ _ _ _ _ _)
     · -- `¬ k < e.1`, and `¬ e.1 < k` from the cut: the key is `e.1`.
       rename_i hke
       have hek : e.1 = k := by
@@ -226,12 +206,14 @@ theorem leafInsertOrSplit_noSplit {cap : Nat} {leaf leaf' : Leaf K V} {k : K} {v
         rw [this]; simp
       · intro hn; cases hn
 
-/-- The `Split` outcome: both halves are sorted, meet the minimum fill for
-every capacity from 1 up (`with_caps` enforces 4), and the separator (the right half's first key) sits
-strictly above the left half and at or below the right half. Together the
-halves hold exactly the old entries plus the new one. -/
+/-- The `Split` outcome: both halves are sorted and hold between `cap / 2`
+and `cap` entries for every capacity from 2 up (`with_caps` enforces 4);
+the separator, the right half's first key, sits strictly above the left
+half and at or below the right half; the key was absent; and the halves
+concatenated are the old leaf with the new entry inserted at its sorted
+position. -/
 theorem leafInsertOrSplit_split {cap : Nat} {leaf l r : Leaf K V} {k : K} {v : V}
-    {sep : K} (hcap : 1 ≤ cap) (hs : Sorted leaf) (hlen : leaf.length ≤ cap)
+    {sep : K} (hcap : 2 ≤ cap) (hs : Sorted leaf) (hlen : leaf.length ≤ cap)
     (h : leafInsertOrSplit cap leaf k v = .split l r sep) :
     Sorted l ∧ Sorted r ∧
       cap / 2 ≤ l.length ∧ l.length ≤ cap ∧ cap / 2 ≤ r.length ∧ r.length ≤ cap ∧
@@ -243,10 +225,7 @@ theorem leafInsertOrSplit_split {cap : Nat} {leaf l r : Leaf K V} {k : K} {v : V
   have hsB : Sorted B := hs.sublist (List.sublist_append_right A B)
   -- Reduce every arm to: the key is absent and the leaf is full.
   have key : (∀ b ∈ B, k < b.1) ∧ ¬ (A ++ B).length < cap ∧
-      LeafInsert.split
-        (leafSplit (A ++ B) A.length (k, v)).1 (leafSplit (A ++ B) A.length (k, v)).2
-        (match (leafSplit (A ++ B) A.length (k, v)).2 with
-          | e :: _ => e.1 | [] => k) = .split l r sep := by
+      leafSplitInsert (A ++ B) A.length k v = .split l r sep := by
     cases B with
     | nil =>
       simp only [List.head?_nil] at h
@@ -264,45 +243,124 @@ theorem leafInsertOrSplit_split {cap : Nat} {leaf l r : Leaf K V} {k : K} {v : V
           exact ⟨forall_gt_of_head_gt hsB hke, hfull, h⟩
       · cases h
   obtain ⟨hgt, hfull, h⟩ := key
-  have hfull' : (A ++ B).length = cap := by omega
+  have habsent : ∀ e ∈ A ++ B, e.1 ≠ k := by
+    intro x hx
+    rcases List.mem_append.mp hx with hx | hx
+    · exact ne_of_lt (hA x hx)
+    · exact (ne_of_lt (hgt x hx)).symm
+  have hfull' : A.length + B.length = cap := by simp at hfull hlen; omega
   have hsorted : Sorted (A ++ (k, v) :: B) := sorted_append_cons hs hA hgt
-  rw [leafSplit_append] at h
-  simp only [List.length_append] at hfull' h
-  -- Name the cut point and the two halves.
+  simp only [leafSplitInsert, leafSplit, List.length_append] at h
+  -- Name the cut point; the right half is nonempty because `cap ≥ 2`.
   generalize hlc : (A.length + B.length + 1) / 2 = lc at h
-  have hlc_le : lc ≤ A.length + B.length := by omega
-  rcases hr : (A ++ (k, v) :: B).drop lc with _ | ⟨e, r'⟩
+  have hlc_lt : lc < A.length + B.length := by omega
+  rcases hr : (A ++ B).drop lc with _ | ⟨e, r'⟩
   · exfalso
     have := congrArg List.length hr
     simp at this; omega
   rw [hr] at h
-  simp only [LeafInsert.split.injEq] at h
-  obtain ⟨rfl, rfl, rfl⟩ := h
-  have hsplit : (A ++ (k, v) :: B).take lc ++ e :: r' = A ++ (k, v) :: B := by
+  simp only [] at h
+  -- The old leaf, cut at `lc`.
+  have hcut : (A ++ B).take lc ++ e :: r' = A ++ B := by
     rw [← hr, List.take_append_drop]
-  have hs' : Sorted ((A ++ (k, v) :: B).take lc ++ e :: r') := by rw [hsplit]; exact hsorted
+  have hs' : Sorted ((A ++ B).take lc ++ e :: r') := by rw [hcut]; exact hs
   simp only [Sorted, List.pairwise_append, List.pairwise_cons] at hs'
-  have hr_len : r'.length + 1 + lc = A.length + B.length + 1 := by
+  have hget : (A ++ B)[lc]? = some e := by
+    have := congrArg (fun l => l[0]?) hr
+    simpa [List.getElem?_drop] using this
+  have hr_len : r'.length + 1 + lc = A.length + B.length := by
     have := congrArg List.length hr
     simp only [List.length_drop, List.length_append, List.length_cons] at this
     omega
   have hlc2 : A.length + B.length ≤ 2 * lc ∧ 2 * lc ≤ A.length + B.length + 1 := by omega
-  refine ⟨hs'.1, ?_, ?_, ?_, ?_, ?_, ?_, ?_, ?_, ?_⟩
-  · exact List.Pairwise.cons hs'.2.1.1 hs'.2.1.2
-  · simp only [List.length_take, List.length_append, List.length_cons]; omega
-  · simp only [List.length_take, List.length_append, List.length_cons]; omega
-  · simp only [List.length_cons]; omega
-  · simp only [List.length_cons]; omega
-  · intro a ha; exact hs'.2.2 a ha e (List.mem_cons_self)
-  · intro b hb
-    rcases List.mem_cons.mp hb with rfl | hb
-    · exact le_refl _
-    · exact le_of_lt (hs'.2.1.1 b hb)
-  · intro x hx
-    rcases List.mem_append.mp hx with hx | hx
-    · exact ne_of_lt (hA x hx)
-    · exact (ne_of_lt (hgt x hx)).symm
-  · rw [hidx, insertAt_append]; exact hsplit
+  split at h
+  · -- `k < sep`: the new entry goes left, so the cut sits at or past `A`.
+    rename_i hke
+    simp only [LeafInsert.split.injEq] at h
+    obtain ⟨rfl, rfl, rfl⟩ := h
+    have hAl : A.length ≤ lc := by
+      by_cases hAl : A.length ≤ lc
+      · exact hAl
+      · exfalso
+        have hlt := Nat.lt_of_not_le hAl
+        rw [List.getElem?_append_left hlt] at hget
+        exact lt_irrefl (lt_trans (hA e (List.mem_of_getElem? hget)) hke)
+    have hsub : lc - A.length ≤ B.length := by omega
+    have htake : (A ++ B).take lc = A ++ B.take (lc - A.length) := by
+      rw [List.take_append, List.take_of_length_le hAl]
+    have hdrop : (A ++ B).drop lc = B.drop (lc - A.length) := by
+      rw [List.drop_append, List.drop_of_length_le hAl, List.nil_append]
+    rw [htake, insertAt_append]
+    have hleft : Sorted (A ++ (k, v) :: B.take (lc - A.length)) := by
+      refine sorted_append_cons ?_ hA ?_
+      · rw [← htake]; exact hs'.1
+      · intro b hb; exact hgt b (List.mem_of_mem_take hb)
+    refine ⟨hleft, List.Pairwise.cons hs'.2.1.1 hs'.2.1.2, ?_, ?_, ?_, ?_, ?_, ?_, habsent, ?_⟩
+    · simp only [List.length_append, List.length_cons, List.length_take]; omega
+    · simp only [List.length_append, List.length_cons, List.length_take]; omega
+    · simp only [List.length_cons]; omega
+    · simp only [List.length_cons]; omega
+    · intro a ha
+      rcases List.mem_append.mp ha with ha | ha
+      · exact hs'.2.2 a (by rw [htake]; exact List.mem_append_left _ ha) e List.mem_cons_self
+      · rcases List.mem_cons.mp ha with rfl | ha
+        · exact hke
+        · exact hs'.2.2 a (by rw [htake]; exact List.mem_append_right _ ha) e List.mem_cons_self
+    · intro b hb
+      rcases List.mem_cons.mp hb with rfl | hb
+      · exact le_refl _
+      · exact le_of_lt (hs'.2.1.1 b hb)
+    · rw [← hr, hdrop, List.append_assoc, List.cons_append, List.take_append_drop, hidx,
+        insertAt_append]
+  · -- `¬ k < sep`: the new entry goes right, so the cut sits inside `A`.
+    rename_i hke
+    simp only [LeafInsert.split.injEq] at h
+    obtain ⟨rfl, rfl, rfl⟩ := h
+    have hek : e.1 < k := by
+      rcases lt_trichotomy e.1 k with h' | h' | h'
+      · exact h'
+      · exact absurd h' (habsent e (List.mem_of_getElem? hget))
+      · exact absurd h' hke
+    have hlA : lc < A.length := by
+      by_cases hlA : lc < A.length
+      · exact hlA
+      · exfalso
+        have hge := Nat.le_of_not_lt hlA
+        rw [List.getElem?_append_right hge] at hget
+        exact lt_irrefl (lt_trans (hgt e (List.mem_of_getElem? hget)) hek)
+    have htake : (A ++ B).take lc = A.take lc := by
+      rw [List.take_append_of_le_length (Nat.le_of_lt hlA)]
+    have hdrop : (A ++ B).drop lc = A.drop lc ++ B := by
+      rw [List.drop_append_of_le_length (Nat.le_of_lt hlA)]
+    have hlenA : (A.take lc).length = lc := by simp; omega
+    have hidx' : A.length - (A.take lc).length = (A.drop lc).length := by simp; omega
+    rw [htake, ← hr, hdrop, hidx', insertAt_append]
+    have hright : Sorted (A.drop lc ++ (k, v) :: B) := by
+      refine sorted_append_cons ?_ ?_ hgt
+      · exact hs.sublist ((List.drop_sublist lc A).append (List.Sublist.refl B))
+      · intro a ha; exact hA a (List.mem_of_mem_drop ha)
+    -- Every entry of the old right half is at or above `e`, its head.
+    have hge_e : ∀ x ∈ A.drop lc ++ B, e.1 ≤ x.1 := by
+      intro x hx
+      have hx' : x ∈ e :: r' := by rw [← hr, hdrop]; exact hx
+      rcases List.mem_cons.mp hx' with rfl | hx'
+      · exact le_refl _
+      · exact le_of_lt (hs'.2.1.1 x hx')
+    refine ⟨?_, hright, ?_, ?_, ?_, ?_, ?_, ?_, habsent, ?_⟩
+    · rw [← htake]; exact hs'.1
+    · simp only [List.length_take]; omega
+    · simp only [List.length_take]; omega
+    · simp only [List.length_append, List.length_cons, List.length_drop]; omega
+    · simp only [List.length_append, List.length_cons, List.length_drop]; omega
+    · intro a ha
+      exact hs'.2.2 a (by rw [htake]; exact ha) e List.mem_cons_self
+    · intro b hb
+      rcases List.mem_append.mp hb with hb | hb
+      · exact hge_e b (List.mem_append_left _ hb)
+      · rcases List.mem_cons.mp hb with rfl | hb
+        · exact le_of_lt hek
+        · exact hge_e b (List.mem_append_right _ hb)
+    · rw [← List.append_assoc, List.take_append_drop, hidx, insertAt_append]
 
 end Leaf
 

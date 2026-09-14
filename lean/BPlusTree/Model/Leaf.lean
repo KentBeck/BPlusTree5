@@ -23,17 +23,10 @@ writes only the value because the key there already equals the new key. -/
 def replaceAt (l : List α) (i : Nat) (x : α) : List α :=
   l.take i ++ x :: l.drop (i + 1)
 
-/-- The split arm of `leaf_insert_or_split`, arithmetic verbatim: decide
-how many existing items stay left (`left_keep`), move the rest right, then
-insert the new item into whichever side it sorts into. -/
-def leafSplit (leaf : List α) (idx : Nat) (x : α) : List α × List α :=
-  let totalItems := leaf.length + 1
-  let leftCount := totalItems / 2
-  let leftKeep := if idx < leftCount then leftCount - 1 else leftCount
-  let kept := leaf.take leftKeep
-  let moved := leaf.drop leftKeep
-  if idx < leftCount then (insertAt kept idx x, moved)
-  else (kept, insertAt moved (idx - leftKeep) x)
+/-- `split_leaf`: the left half keeps `(len + 1) / 2` items and the rest
+move to the new right sibling. -/
+def leafSplit (leaf : List α) : List α × List α :=
+  (leaf.take ((leaf.length + 1) / 2), leaf.drop ((leaf.length + 1) / 2))
 
 section Leaf
 
@@ -61,6 +54,20 @@ inductive LeafInsert (K V : Type) where
   | noSplit (leaf : Leaf K V) (old : Option V)
   | split (left right : Leaf K V) (sep : K)
 
+/-- The split arm of `leaf_insert_or_split`: `split_leaf`, then the
+ordinary insert on whichever half the key sorts into, routed by the
+separator (`key_clone_at(r.keys_ptr, 0)`). -/
+def leafSplitInsert (leaf : Leaf K V) (idx : Nat) (k : K) (v : V) : LeafInsert K V :=
+  match leafSplit leaf with
+  | (l, r) =>
+    match r with
+    | e :: _ =>
+      if k < e.1 then .split (insertAt l idx (k, v)) r e.1
+      else .split l (insertAt r (idx - l.length) (k, v)) e.1
+    -- Unreachable: a full leaf has at least two items (`cap ≥ 2`), so the
+    -- right half is never empty.
+    | [] => .split l r k
+
 /-- `leaf_insert_or_split`. `cap` is `leaf_layout.cap`. -/
 def leafInsertOrSplit (cap : Nat) (leaf : Leaf K V) (k : K) (v : V) : LeafInsert K V :=
   let idx := lowerBound leaf k
@@ -72,11 +79,7 @@ def leafInsertOrSplit (cap : Nat) (leaf : Leaf K V) (k : K) (v : V) : LeafInsert
 where
   insertOrSplit (idx : Nat) : LeafInsert K V :=
     if leaf.length < cap then .noSplit (insertAt leaf idx (k, v)) none
-    else
-      let (l, r) := leafSplit leaf idx (k, v)
-      -- `key_clone_at(r.keys_ptr, 0)`; the right half is never empty
-      -- (`leafSplit_right_ne_nil`), so the fallback is unreachable.
-      .split l r (match r with | e :: _ => e.1 | [] => k)
+    else leafSplitInsert leaf idx k v
 
 end Leaf
 

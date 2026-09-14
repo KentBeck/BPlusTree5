@@ -208,20 +208,6 @@ impl<K: Ord + Clone, V> BPlusTreeMap<K, V> {
         );
         (*parts.hdr).len = (cur_len + 1) as u16;
     }
-    #[inline(always)]
-    unsafe fn shift_and_write(
-        &self,
-        keys_ptr: *mut K,
-        vals_ptr: *mut V,
-        idx: usize,
-        cur_len: usize,
-        key: K,
-        value: V,
-    ) {
-        self.shift_right(keys_ptr, vals_ptr, idx, cur_len);
-        self.write_kv_at(keys_ptr, vals_ptr, idx, key, value);
-    }
-
     unsafe fn leaf_insert_or_split(
         &mut self,
         leaf: NonNull<u8>,
@@ -229,8 +215,7 @@ impl<K: Ord + Clone, V> BPlusTreeMap<K, V> {
         value: V,
     ) -> InsertResult<K, V> {
         let parts = layout::carve_leaf::<K, V>(leaf, &self.leaf_layout);
-        let hdr = &mut *parts.hdr;
-        let len = hdr.len as usize;
+        let len = (*parts.hdr).len as usize;
         let keys = core::slice::from_raw_parts(parts.keys_ptr as *const K, len);
         match self.binary_search_keys(keys, &key) {
             Ok(idx) => {
@@ -242,82 +227,60 @@ impl<K: Ord + Clone, V> BPlusTreeMap<K, V> {
             Err(idx) => {
                 if len < self.leaf_layout.cap as usize {
                     self.insert_into_leaf_slot(parts, idx, len, key, value);
-                    InsertResult::NoSplit(None)
+                    return InsertResult::NoSplit(None);
+                }
+
+                // The leaf is full: split it first, then run the ordinary
+                // insert on whichever half the key sorts into. A key below
+                // the separator keeps its slot in the left half; a key
+                // above it lands in the right half past slot 0, so the
+                // separator read at the split stays the right half's first
+                // key.
+                let (right, sep) = self.split_leaf(leaf);
+                let left_len = self.node_len(leaf);
+                if key < sep {
+                    self.insert_into_leaf_slot(parts, idx, left_len, key, value);
                 } else {
-                    // Zero-allocation in-place split: move the upper half to the right
-                    // leaf and insert the new item. Moved-from slots stay
-                    // physically populated; each node's hdr.len excludes them.
-                    let total_items = len + 1;
-                    let left_count = total_items / 2;
-                    let right_count = total_items - left_count;
-
-                    // Determine insertion position (idx from Err was computed above as `idx`)
-                    let insert_pos = idx;
-
-                    // Allocate right node and carve
-                    let right = alloc_leaf_block(&self.leaf_layout).expect("alloc right leaf");
                     let r = layout::carve_leaf::<K, V>(right, &self.leaf_layout);
-
-                    // Decide how many existing items remain on the left before insertion
-                    let left_keep = if insert_pos < left_count {
-                        left_count - 1
-                    } else {
-                        left_count
-                    };
-
-                    // Move items [left_keep..len) to the right leaf: the
-                    // inverse of merge_leaf_into.
-                    let move_count = len - left_keep;
-                    self.move_kv_range(
-                        parts.keys_ptr as *const K,
-                        parts.vals_ptr as *const V,
-                        left_keep,
-                        r.keys_ptr as *mut K,
-                        r.vals_ptr as *mut V,
-                        0,
-                        move_count,
-                    );
-                    let right_len = move_count;
-
-                    // Insert new item into the correct side
-                    if insert_pos < left_count {
-                        // Insert into left: shift [insert_pos..left_keep) right by 1, then write
-                        self.shift_and_write(
-                            parts.keys_ptr as *mut K,
-                            parts.vals_ptr as *mut V,
-                            insert_pos,
-                            left_keep,
-                            key,
-                            value,
-                        );
-                        // Left now has left_count items; right already has right_count
-                        hdr.len = left_count as u16;
-                        (*r.hdr).len = right_count as u16;
-                    } else {
-                        // Insert into right
-                        let right_insert = insert_pos - left_keep; // position within right
-                        self.shift_and_write(
-                            r.keys_ptr as *mut K,
-                            r.vals_ptr as *mut V,
-                            right_insert,
-                            right_len,
-                            key,
-                            value,
-                        );
-                        hdr.len = left_keep as u16; // equals left_count
-                        (*r.hdr).len = (right_len + 1) as u16; // equals right_count
-                    }
-
-                    self.link_leaf_after(leaf, right);
-
-                    let sep = self.key_clone_at(r.keys_ptr as *const K, 0);
-                    InsertResult::Split {
-                        sep_key: sep,
-                        right,
-                        old_value: None,
-                    }
+                    self.insert_into_leaf_slot(r, idx - left_len, len - left_len, key, value);
+                }
+                InsertResult::Split {
+                    sep_key: sep,
+                    right,
+                    old_value: None,
                 }
             }
         }
+    }
+
+    /// Split a full leaf: the upper half moves to a new right sibling,
+    /// linked in after `leaf`. The left half keeps `(len + 1) / 2` items,
+    /// so both halves meet the minimum fill for every capacity. Returns the
+    /// new sibling and the separator, its first key. Inverse of
+    /// `merge_leaf_into`.
+    unsafe fn split_leaf(&mut self, leaf: NonNull<u8>) -> (NonNull<u8>, K) {
+        let l = layout::carve_leaf::<K, V>(leaf, &self.leaf_layout);
+        let len = (*l.hdr).len as usize;
+        let left_len = (len + 1) / 2;
+        let move_count = len - left_len;
+
+        let right = alloc_leaf_block(&self.leaf_layout).expect("alloc right leaf");
+        let r = layout::carve_leaf::<K, V>(right, &self.leaf_layout);
+        // Moved-from slots stay physically populated; hdr.len excludes them.
+        self.move_kv_range(
+            l.keys_ptr as *const K,
+            l.vals_ptr as *const V,
+            left_len,
+            r.keys_ptr as *mut K,
+            r.vals_ptr as *mut V,
+            0,
+            move_count,
+        );
+        (*l.hdr).len = left_len as u16;
+        (*r.hdr).len = move_count as u16;
+        self.link_leaf_after(leaf, right);
+
+        let sep = self.key_clone_at(r.keys_ptr as *const K, 0);
+        (right, sep)
     }
 }
