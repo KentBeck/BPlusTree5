@@ -93,6 +93,55 @@ Keeping names aligned is what makes the "the Lean matches the Rust" step
 reviewable by eye; do not refactor the model into something prettier
 than the code until the code has been refactored to match.
 
+**Status:** `lean/BPlusTree/Model/Leaf.lean` ports the leaf half of
+`insert.rs` (`insertAt`, `replaceAt`, `lowerBound`, `leafSplit`,
+`leafInsertOrSplit`). Branch, delete, and range are not started.
+
+## Phase 2b — the heap model (memory safety)
+
+The list model has no allocation, so "no double free" is vacuous there.
+A second, lower model puts nodes in a store keyed by node identity and
+runs the operations in a state monad whose primitives can fault:
+
+```lean
+abbrev NodeId := Nat
+inductive NodeRec (K V)
+  | leaf   (kvs : List (K × V)) (prev next : Option NodeId)
+  | branch (keys : List K) (children : List NodeId)
+structure Heap (K V) where
+  nodes : Finmap NodeId (NodeRec K V)
+  fresh : NodeId
+abbrev M K V := StateT (Heap K V) (Except MemFault)
+-- read / write / free fault on an unallocated id; alloc never faults
+```
+
+Its primitives are the Rust's: `alloc_leaf_block` / `free_leaf_block`,
+`free_emptied_leaf` with its length-zero precondition, `link_leaf_after`
+/ `unlink_leaf`, `drop_subtree` versus the incremental frees. The
+theorems it adds:
+
+- **No use after free, no double free:** on a well-formed heap every
+  operation returns `Except.ok`. A dangling read or a second free is the
+  only way to fault, so success on all inputs is the proof.
+- **No node leak:** after every operation the store's domain equals the
+  nodes reachable from the root.
+- **No double drop, no lost `K`/`V`:** values as unique tokens; each
+  token appears exactly once across the store, the return value, and the
+  explicitly dropped set. This is the fuzz suite's `Tracked` canary,
+  proven rather than sampled, and it covers `rotate_leaf_*` dropping the
+  old separator, `merge_leaf_pair` dropping one, and `replace_root`
+  emptying the root before freeing it.
+- **Sibling chain integrity:** `prev`/`next` are in the model, so the
+  doubly-linked invariant `link_leaf_after` and `unlink_leaf` maintain is
+  provable. The list model cannot state it.
+
+The heap model refines the list model by simulation; the list model
+refines the spec as before. Byte-level concerns (offsets in `layout.rs`,
+`ptr::copy` overlap, uninitialised reads, aliasing) stay with Miri.
+Verifying the Rust source itself for memory safety would be Kani
+(bounded model checking of unsafe Rust), a separate item that
+complements this plan.
+
 ## Phase 3 — the invariant
 
 `WF t` is the conjunction of, per node:
@@ -119,8 +168,14 @@ In this order, because difficulty rises sharply:
 1. `get`, `first`, `last`, `contains_key` — read-only, warm-up.
 2. `insert` including root growth. Key lemmas, all `omega` once the
    model is right, for every `cap ≥ 4`:
-   - leaf split: `(cap + 1) / 2 ≥ cap / 2` and
-     `cap + 1 - (cap + 1) / 2 ≥ cap / 2`, so both halves meet the minimum;
+   - ~~leaf split~~ — DONE (`lean/BPlusTree/Proofs/Leaf.lean`).
+     `leafSplit_eq` shows the two `left_keep` cases both equal "insert,
+     then cut at `(len + 1) / 2`"; `leafInsertOrSplit_split` gives both
+     halves sorted with `cap / 2 ≤ len ≤ cap`, the separator bounding
+     both sides, and the halves concatenating to the inserted list;
+     `leafInsertOrSplit_noSplit` covers the absorb and overwrite arms.
+     The split theorem needs `cap ≥ 1` (omega produced the `cap = 0`
+     counterexample); `with_caps` enforces 4.
    - branch split: after promotion both sides hold `≥ cap / 2` keys.
 3. `range` bound resolution: `cut_in_leaf` with `after_equal`, the
    hop to the next/previous leaf when the cut sits at an edge, and the
@@ -191,19 +246,24 @@ a decision on; each is either a theorem or a code change.
 
 Phases 1–3 plus `get` and `insert`: about two weeks for someone fluent in
 Lean. `remove` is the bulk of the work and can double that. `range` sits
-between. Nothing here blocks on Rust changes except the optional insert
-decision.
+between. Phase 2b roughly doubles the total again: two to three months
+for both levels. Nothing here blocks on Rust changes.
 
 ## Layout
 
 ```
 lean/
-  lakefile.lean
-  BPlusTree/Model.lean      -- Node, Tree, toList, the ported operations
-  BPlusTree/WF.lean         -- the invariant, checker equivalence
-  BPlusTree/Insert.lean     -- Phase 4.2
-  BPlusTree/Range.lean      -- Phase 4.3
-  BPlusTree/Remove.lean     -- Phase 4.4
-  BPlusTree/Depth.lean      -- finding 1
-  Replay/Main.lean          -- Phase 5.1 executable
+  lakefile.toml, lean-toolchain, README.md (correspondence table)
+  BPlusTree/Model/Leaf.lean     -- leaf half of insert.rs (done)
+  BPlusTree/Model/Branch.lean   -- branch half, root growth
+  BPlusTree/Model/Tree.lean     -- Node, Tree, toList
+  BPlusTree/Model/Heap.lean     -- Phase 2b
+  BPlusTree/Proofs/Leaf.lean    -- leaf split and insert theorems (done)
+  BPlusTree/Proofs/WF.lean      -- the invariant, checker equivalence
+  BPlusTree/Proofs/Insert.lean  -- Phase 4.2
+  BPlusTree/Proofs/Range.lean   -- Phase 4.3
+  BPlusTree/Proofs/Remove.lean  -- Phase 4.4
+  BPlusTree/Proofs/Depth.lean   -- finding 1
+  BPlusTree/Proofs/Heap.lean    -- Phase 2b theorems
+  Replay/Main.lean              -- Phase 5.1 executable
 ```

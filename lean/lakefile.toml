@@ -1,0 +1,5 @@
+name = "bplustree"
+defaultTargets = ["BPlusTree"]
+
+[[lean_lib]]
+name = "BPlusTree"
