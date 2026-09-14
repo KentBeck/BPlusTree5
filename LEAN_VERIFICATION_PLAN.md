@@ -41,7 +41,7 @@ obtained by `toList`. Every public operation gets a theorem against it:
 
 | Rust | Spec theorem |
 |---|---|
-| `insert k v` | `toList (insert k v t) = insertSorted k v (toList t)`; returns the old value at `k` |
+| `insert k v` | ~~`toList (insert k v t) = insertSorted k v (toList t)`; returns the old value at `k`~~ — DONE |
 | `remove k` | `toList (remove k t) = (toList t).filter (·.1 ≠ k)`; returns the value at `k` |
 | `get k` | `get k t = (toList t).lookup k` |
 | `range lo hi` | `(range lo hi t).toList = (toList t).filter (inBounds lo hi)`, including excluded and inverted bounds |
@@ -96,7 +96,8 @@ than the code until the code has been refactored to match.
 **Status:** `lean/BPlusTree/Model/Leaf.lean`, `Model/Branch.lean`, and
 `Model/Tree.lean` port `insert.rs` in full (`leafInsertOrSplit`,
 `branchApplySplit`, `branchInsertAndSplit`, `growRoot`, `insertRec`,
-`insertTree`). `toList`, delete, and range are not started.
+`insertTree`) and define `Node.toList`. Delete, range, and get are not
+started.
 
 ## Phase 2b — the heap model (memory safety)
 
@@ -157,8 +158,9 @@ complements this plan.
 5. **Count**: `count = length (toList t)`.
 
 **Status:** `WF` is defined in `lean/BPlusTree/Proofs/Tree.lean` with
-items 1–4 (indexed by height, so item 4 is built in); item 5 waits on
-`toList`. The checker equivalence below is not started.
+items 1–4 (indexed by height, so item 4 is built in). Item 5 is a
+one-line addition now that `toList` exists but is not yet part of `WF`.
+The checker equivalence below is not started.
 
 Then prove `check_invariants_detailed t = ok ↔ WF t` (minus item 4, which
 the Rust checker does not test; see below). That ties the proof to the
@@ -196,9 +198,11 @@ In this order, because difficulty rises sharply:
      at the same height and bounds; a `Split` result is two `WF`
      non-root halves around a separator strictly inside the bounds. That
      strictness is what discharges the branch theorems' `SepFits` at the
-     parent. `insertTree_wf` adds root growth. Still open for insert: the
-     `toList` refinement (insert = sorted insert) and the returned old
-     value.
+     parent. `insertTree_wf` adds root growth.
+   - ~~`toList` refinement~~ — DONE. `Node.toList` is the leaves' entries
+     left to right; `insertTree_toList` gives
+     `toList (insert k v t) = insertSorted k v (toList t)` and the
+     returned old value. Insert is complete at the model level.
 3. `range` bound resolution: `cut_in_leaf` with `after_equal`, the
    hop to the next/previous leaf when the cut sits at an edge, and the
    inverted-bounds check in `make_items`. Double-ended iteration:
@@ -286,13 +290,15 @@ lean/
   lakefile.toml, lean-toolchain, README.md (correspondence table)
   BPlusTree/Model/Leaf.lean     -- leaf half of insert.rs (done)
   BPlusTree/Model/Branch.lean   -- branch half, root growth (done)
-  BPlusTree/Model/Tree.lean     -- Node, insertRec, insertTree (done); toList
+  BPlusTree/Model/Spec.lean     -- insertSorted, the abstract spec (done)
+  BPlusTree/Model/Tree.lean     -- Node, toList, insertRec, insertTree (done)
   BPlusTree/Model/Heap.lean     -- Phase 2b
   BPlusTree/Proofs/Leaf.lean    -- leaf split and insert theorems (done)
   BPlusTree/Proofs/Branch.lean  -- branch split, apply-split, root growth (done)
-  BPlusTree/Proofs/Tree.lean    -- WF, chains, insert preserves WF (done)
+  BPlusTree/Proofs/Spec.lean    -- insertSorted lemmas, leaf equations (done)
+  BPlusTree/Proofs/Tree.lean    -- WF, chains, insert preserves WF and
+                                --   refines insertSorted (done)
   BPlusTree/Proofs/WF.lean      -- checker equivalence
-  BPlusTree/Proofs/Insert.lean  -- Phase 4.2 toList refinement
   BPlusTree/Proofs/Range.lean   -- Phase 4.3
   BPlusTree/Proofs/Remove.lean  -- Phase 4.4
   BPlusTree/Proofs/Depth.lean   -- finding 1

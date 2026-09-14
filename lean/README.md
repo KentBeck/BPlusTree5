@@ -35,6 +35,8 @@ link a reviewer checks by eye.
 | `insert_rec` | `insertRec` | `insertRec_wf` |
 | `insert` (with root growth) | `insertTree` | `insertTree_wf` |
 | `check_invariants_detailed` bounds, order, fill; plus uniform leaf depth | `WF` (`Proofs/Tree.lean`) | preserved by insert |
+| the leaves' entries left to right (what `items()` yields) | `Node.toList` (`Model/Tree.lean`) | `insertTree_toList`: insert = `insertSorted` on it |
+| sorted-association-list insert (the spec) | `insertSorted` (`Model/Spec.lean`) | |
 
 What the two main theorems say, given a sorted leaf within capacity:
 
@@ -71,6 +73,10 @@ branch theorems' `SepFits` is discharged: the split child's new separator
 lies strictly inside that child's slot bounds, which are the neighbouring
 separators.
 
-Not modelled here: `toList` and the functional spec (insert = sorted
-insert), `remove`, `range`, node memory, and sibling pointers. Those are
-the next phases.
+`insertTree_toList` is the functional half: the new tree's `toList` is
+`insertSorted k v` of the old one, and the returned value is the one
+previously stored under `k` (present iff some value is returned). With
+`insertTree_wf` this is the complete Phase 1 statement for insert.
+
+Not modelled here: `remove`, `range`, `get`, node memory, and sibling
+pointers. Those are the next phases.

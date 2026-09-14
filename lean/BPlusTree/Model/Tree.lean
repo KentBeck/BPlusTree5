@@ -31,6 +31,24 @@ inductive InsertRes (K V : Type) where
   | noSplit (n : Node K V) (old : Option V)
   | split (left : Node K V) (sep : K) (right : Node K V)
 
+mutual
+/-- Every key/value pair in the subtree, in key order once the tree is
+well-formed: the leaves' entries left to right. -/
+def Node.toList : Node K V → List (K × V)
+  | .leaf kvs => kvs
+  | .branch c0 entries => c0.toList ++ entriesToList entries
+
+/-- The entries of a list of children, left to right. -/
+def entriesToList : List (K × Node K V) → List (K × V)
+  | [] => []
+  | (_, c) :: rest => c.toList ++ entriesToList rest
+end
+
+/-- The entries of the children before the one `lastChild` picks. -/
+def frontList (c : Node K V) : List (K × Node K V) → List (K × V)
+  | [] => []
+  | (_, ch) :: rest => c.toList ++ frontList ch rest
+
 /-- The child that `child_for_key` picks, given the entries whose separator
 is `≤ k`: the last of those entries' children, or `children[0]`. -/
 def lastChild (c : Node K V) : List (K × Node K V) → Node K V

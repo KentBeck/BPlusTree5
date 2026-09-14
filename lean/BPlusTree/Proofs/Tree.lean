@@ -1,6 +1,7 @@
 import BPlusTree.Model.Tree
 import BPlusTree.Proofs.Leaf
 import BPlusTree.Proofs.Branch
+import BPlusTree.Proofs.Spec
 
 /-!
 # The tree invariant, and insert preserves it
@@ -255,6 +256,34 @@ theorem inBounds_of_childBounds {lo hi : Option K} {A B : List (K × Node K V)} 
     · rw [hh] at hht; cases hht; exact hlt
     · exact lt_trans hlt ((hb (t, c) (List.mem_append_right _ hc)).2 h hh)
 
+/-- A separator strictly inside the picked child's slot fits strictly
+between the neighbouring entries: this is the branch theorems' `SepFits`,
+for any prefix `A'` with the same keys as `A`. -/
+theorem sepFits_of_strict {A A' B : List (K × Node K V)} {lo hi : Option K} {sep : K}
+    (hs : Sorted (A ++ B)) (hkeys : A'.map Prod.fst = A.map Prod.fst)
+    (hstrict : StrictlyInside (lastBound lo A) (headBound hi B) sep) :
+    SepFits (A' ++ B) A.length sep := by
+  have hlen : A'.length = A.length := by
+    have := congrArg List.length hkeys; simpa using this
+  have hsA : Sorted A := hs.sublist (List.sublist_append_left A B)
+  have hsB : Sorted B := hs.sublist (List.sublist_append_right A B)
+  constructor
+  · intro e he
+    rw [List.take_append_of_le_length (by omega), List.take_of_length_le (by omega)] at he
+    have : e.1 ∈ A.map Prod.fst := by rw [← hkeys]; exact List.mem_map_of_mem he
+    obtain ⟨a, ha, hae⟩ := List.mem_map.mp this
+    obtain ⟨s, hs0⟩ := lastBound_some_of_ne_nil lo A (List.ne_nil_of_mem ha)
+    rw [← hae]
+    exact lt_of_le_of_lt (le_lastBound_of_sorted A lo s hsA hs0 a ha) (hstrict.1 s hs0)
+  · intro e he
+    rw [List.drop_append_of_le_length (by omega), List.drop_of_length_le (by omega),
+      List.nil_append] at he
+    cases B with
+    | nil => simp at he
+    | cons b rest =>
+      exact lt_of_lt_of_le (hstrict.2 b.1 rfl)
+        (le_of_headBound (b :: rest) hi b.1 hsB (by simp) rfl e he)
+
 /-- `insert_rec` preserves the invariant. A `NoSplit` result is well-formed
 at the same height and bounds; a `Split` result gives two well-formed
 non-root halves around a separator strictly inside the bounds, which is
@@ -372,26 +401,8 @@ theorem insertRec_wf (lc bc : Nat) (hlc : 2 ≤ lc) (hbc : 2 ≤ bc) (k : K) (v 
         have hs' : Sorted ((replaceLast c0 A cl).2 ++ B) := sorted_of_keys_eq hkeys hs
         have hb' : ∀ e ∈ (replaceLast c0 A cl).2 ++ B, InBounds lo hi e.1 :=
           forall_key_of_keys_eq hkeys _ hb
-        have hsA : Sorted A := hs.sublist (List.sublist_append_left A B)
-        have hsB : Sorted B := hs.sublist (List.sublist_append_right A B)
-        have hfit : SepFits ((replaceLast c0 A cl).2 ++ B) A.length sep := by
-          constructor
-          · intro e he
-            rw [List.take_append_of_le_length (by simp [hlenA cl]),
-              List.take_of_length_le (by simp [hlenA cl])] at he
-            have : e.1 ∈ A.map Prod.fst := by rw [← hkeysA cl]; exact List.mem_map_of_mem he
-            obtain ⟨a, ha, hae⟩ := List.mem_map.mp this
-            obtain ⟨s, hs0⟩ := lastBound_some_of_ne_nil lo A (List.ne_nil_of_mem ha)
-            rw [← hae]
-            exact lt_of_le_of_lt (le_lastBound_of_sorted A lo s hsA hs0 a ha) (hstrict.1 s hs0)
-          · intro e he
-            rw [List.drop_append_of_le_length (by simp [hlenA cl]),
-              List.drop_of_length_le (by simp [hlenA cl]), List.nil_append] at he
-            cases B with
-            | nil => simp at he
-            | cons b rest =>
-              exact lt_of_lt_of_le (hstrict.2 b.1 rfl)
-                (le_of_headBound (b :: rest) hi b.1 hsB (by simp) rfl e he)
+        have hfit : SepFits ((replaceLast c0 A cl).2 ++ B) A.length sep :=
+          sepFits_of_strict hs (hkeysA cl) hstrict
         have hidx : A.length ≤ ((replaceLast c0 A cl).2 ++ B).length := by
           simp [hlenA cl]
         have hlen' : ((replaceLast c0 A cl).2 ++ B).length ≤ bc := by
@@ -463,6 +474,292 @@ theorem insertTree_wf (lc bc : Nat) (hlc : 2 ≤ lc) (hbc : 2 ≤ bc) (h : Nat) 
     refine ⟨by simp [Sorted], ?_, by simp; omega, by simp, hwl, hwr⟩
     intro e _
     exact ⟨(fun _ hl => by cases hl), (fun _ hh => by cases hh)⟩
+
+/-! ## `toList` -/
+
+theorem entriesToList_append (L R : List (K × Node K V)) :
+    entriesToList (L ++ R) = entriesToList L ++ entriesToList R := by
+  induction L with
+  | nil => rfl
+  | cons e rest ih => obtain ⟨s, c⟩ := e; simp [entriesToList, ih]
+
+/-- A branch's entries, cut around the picked child. -/
+theorem toList_branch_split (c : Node K V) (A B : List (K × Node K V)) :
+    (Node.branch c (A ++ B)).toList =
+      frontList c A ++ (lastChild c A).toList ++ entriesToList B := by
+  induction A generalizing c with
+  | nil => simp [Node.toList, frontList, lastChild]
+  | cons e rest ih =>
+    obtain ⟨s, ch⟩ := e
+    have := ih ch
+    simp only [Node.toList] at this
+    simp only [List.cons_append, Node.toList, entriesToList, frontList, lastChild, this,
+      List.append_assoc]
+
+theorem frontList_replaceLast (c : Node K V) (A : List (K × Node K V)) (c' : Node K V) :
+    frontList (replaceLast c A c').1 (replaceLast c A c').2 = frontList c A := by
+  induction A generalizing c with
+  | nil => rfl
+  | cons e rest ih => obtain ⟨s, ch⟩ := e; simp [replaceLast, frontList, ih ch]
+
+theorem lastChild_replaceLast (c : Node K V) (A : List (K × Node K V)) (c' : Node K V) :
+    lastChild (replaceLast c A c').1 (replaceLast c A c').2 = c' := by
+  induction A generalizing c with
+  | nil => rfl
+  | cons e rest ih => obtain ⟨s, ch⟩ := e; simp [replaceLast, lastChild, ih ch]
+
+theorem chain_append_right (P : Option K → Option K → Node K V → Prop)
+    (A B : List (K × Node K V)) (lo hi : Option K) (c : Node K V)
+    (h : Chain P lo hi c (A ++ B)) : Chain P (lastBound lo A) hi (lastChild c A) B := by
+  induction A generalizing lo c with
+  | nil => exact h
+  | cons e rest ih => obtain ⟨s, ch⟩ := e; exact ih (some s) ch h.2
+
+/-- Every entry under a chain lies within the chain's outer bounds. -/
+theorem chain_toList_bounds (P : Option K → Option K → Node K V → Prop)
+    (hP : ∀ lo hi c, P lo hi c → ∀ e ∈ c.toList, InBounds lo hi e.1)
+    (L : List (K × Node K V)) (lo hi : Option K) (c : Node K V) (hsort : Sorted L)
+    (hb : ∀ e ∈ L, InBounds lo hi e.1) (hch : Chain P lo hi c L) :
+    ∀ e ∈ c.toList ++ entriesToList L, InBounds lo hi e.1 := by
+  induction L generalizing lo c with
+  | nil => intro e he; simp only [entriesToList, List.append_nil] at he; exact hP lo hi c hch e he
+  | cons x rest ih =>
+    obtain ⟨s, ch⟩ := x
+    simp only [Sorted, List.pairwise_cons] at hsort
+    have hs : InBounds lo hi s := hb (s, ch) List.mem_cons_self
+    intro e he
+    simp only [entriesToList] at he
+    rcases List.mem_append.mp he with he | he
+    · have := hP lo (some s) c hch.1 e he
+      exact ⟨this.1, fun h hh => lt_trans (this.2 s rfl) (hs.2 h hh)⟩
+    · have hb' : ∀ x ∈ rest, InBounds (some s) hi x.1 := fun x hx =>
+        ⟨fun l hl => by cases hl; exact le_of_lt (hsort.1 x hx),
+          (hb x (List.mem_cons_of_mem _ hx)).2⟩
+      have := ih (some s) ch hsort.2 hb' hch.2 e he
+      exact ⟨fun l hl => le_trans (hs.1 l hl) (this.1 s rfl), this.2⟩
+
+/-- Entries of a well-formed subtree lie within its bounds. -/
+theorem wf_toList_bounds (lc bc : Nat) :
+    ∀ (h : Nat) (n : Node K V) (isRoot : Bool) (lo hi : Option K),
+      WF lc bc h isRoot lo hi n → ∀ e ∈ n.toList, InBounds lo hi e.1 := by
+  intro h
+  induction h with
+  | zero =>
+    intro n isRoot lo hi hwf
+    cases n with
+    | branch _ _ => exact absurd hwf id
+    | leaf kvs => exact hwf.2.1
+  | succ h ih =>
+    intro n isRoot lo hi hwf
+    cases n with
+    | leaf _ => exact absurd hwf id
+    | branch c0 entries =>
+      obtain ⟨hsort, hb, _, _, hchain⟩ := hwf
+      simp only [Node.toList]
+      exact chain_toList_bounds _ (fun lo hi c hw => ih c false lo hi hw) entries lo hi c0 hsort
+        hb hchain
+
+/-- Keys before the picked child sort below `k`; keys after it sort above. -/
+theorem front_lt_of_route {lc bc h : Nat} {A B : List (K × Node K V)} {lo hi : Option K}
+    {c0 : Node K V} {k : K} (hs : Sorted (A ++ B)) (hb : ∀ e ∈ A ++ B, InBounds lo hi e.1)
+    (hchain : Chain (WF lc bc h false) lo hi c0 (A ++ B))
+    (hkC : InBounds (lastBound lo A) (headBound hi B) k) :
+    (∀ e ∈ frontList c0 A, e.1 < k) ∧ (∀ e ∈ entriesToList B, k < e.1) := by
+  have hP : ∀ (lo hi : Option K) (c : Node K V), WF lc bc h false lo hi c →
+      ∀ e ∈ c.toList, InBounds lo hi e.1 :=
+    fun lo hi c hw => wf_toList_bounds lc bc h c false lo hi hw
+  constructor
+  · -- Induct along `A`: each front child is bounded above by the next
+    -- separator, which is at most the picked child's lower bound.
+    suffices ∀ (A : List (K × Node K V)) (lo : Option K) (c0 : Node K V),
+        Sorted (A ++ B) → (∀ e ∈ A ++ B, InBounds lo hi e.1) →
+        Chain (WF lc bc h false) lo hi c0 (A ++ B) →
+        ∀ e ∈ frontList c0 A, ∀ s, lastBound lo A = some s → e.1 < s by
+      intro e he
+      cases A with
+      | nil => simp [frontList] at he
+      | cons x rest =>
+        obtain ⟨s, hs0⟩ := lastBound_some_of_ne_nil lo (x :: rest) (by simp)
+        exact lt_of_lt_of_le (this _ lo c0 hs hb hchain e he s hs0) (hkC.1 s hs0)
+    intro A
+    induction A with
+    | nil => intro lo c0 _ _ _ e he; simp [frontList] at he
+    | cons x rest ih =>
+      intro lo c0 hs hb hchain e he s hs0
+      obtain ⟨s0, ch⟩ := x
+      simp only [List.cons_append, Sorted, List.pairwise_cons] at hs
+      simp only [frontList] at he
+      have hs0' : lastBound (some s0) rest = some s := hs0
+      have hs0_le : s0 ≤ s := by
+        rcases lastBound_mem (some s0) rest s hs0' with ⟨_, hh⟩ | ⟨c, hc⟩
+        · cases hh; exact le_refl _
+        · exact le_of_lt (hs.1 (s, c) (List.mem_append_left _ hc))
+      rcases List.mem_append.mp he with he | he
+      · exact lt_of_lt_of_le ((hP lo (some s0) c0 hchain.1 e he).2 s0 rfl) hs0_le
+      · exact ih (some s0) ch hs.2
+          (fun x hx => ⟨fun l hl => by cases hl; exact le_of_lt (hs.1 x hx),
+            (hb x (List.mem_cons_of_mem _ hx)).2⟩) hchain.2 e he s hs0'
+  · intro e he
+    have hch := chain_append_right _ A B lo hi c0 hchain
+    cases B with
+    | nil => simp [entriesToList] at he
+    | cons x rest =>
+      obtain ⟨t, ch⟩ := x
+      have hsB : Sorted ((t, ch) :: rest) := hs.sublist (List.sublist_append_right A _)
+      have hbB : ∀ e ∈ (t, ch) :: rest, InBounds lo hi e.1 :=
+        fun e he => hb e (List.mem_append_right _ he)
+      simp only [Sorted, List.pairwise_cons] at hsB
+      simp only [entriesToList] at he
+      have hkt : k < t := hkC.2 t rfl
+      have := chain_toList_bounds _ hP rest (some t) hi ch hsB.2
+        (fun x hx => ⟨fun l hl => by cases hl; exact le_of_lt (hsB.1 x hx),
+          (hbB x (List.mem_cons_of_mem _ hx)).2⟩) hch.2 e he
+      exact lt_of_lt_of_le hkt (this.1 t rfl)
+
+/-- `insert_rec` refines `insertSorted` through `toList`, and the value it
+returns is the one previously stored under the key, if any. -/
+theorem insertRec_toList (lc bc : Nat) (hlc : 2 ≤ lc) (hbc : 2 ≤ bc) (k : K) (v : V) :
+    ∀ (h : Nat) (n : Node K V) (isRoot : Bool) (lo hi : Option K),
+      WF lc bc h isRoot lo hi n → InBounds lo hi k →
+      match insertRec lc bc k v n with
+      | .noSplit n' old =>
+        n'.toList = insertSorted k v n.toList ∧
+          (∀ o, old = some o → (k, o) ∈ n.toList) ∧
+          (old = none → ∀ e ∈ n.toList, e.1 ≠ k)
+      | .split l _ r =>
+        l.toList ++ r.toList = insertSorted k v n.toList ∧ ∀ e ∈ n.toList, e.1 ≠ k := by
+  intro h
+  induction h with
+  | zero =>
+    intro n isRoot lo hi hwf hk
+    cases n with
+    | branch c0 entries => exact absurd hwf id
+    | leaf kvs =>
+      obtain ⟨hs, hb, hlen, hmin⟩ := hwf
+      rw [insertRec]
+      rcases hres : leafInsertOrSplit lc kvs k v with ⟨l, old⟩ | ⟨l, r, sep⟩
+      · obtain ⟨_, _, hsome, hnone, _⟩ := leafInsertOrSplit_noSplit hs hlen hres
+        refine ⟨leafInsertOrSplit_noSplit_eq hs hres, fun o ho => (hsome o ho).1,
+          fun hn => (hnone hn).1⟩
+      · obtain ⟨_, _, _, _, _, _, _, _, habs, _⟩ := leafInsertOrSplit_split hlc hs hlen hres
+        exact ⟨leafInsertOrSplit_split_eq hlc hs hlen hres, habs⟩
+  | succ h ih =>
+    intro n isRoot lo hi hwf hk
+    cases n with
+    | leaf kvs => exact absurd hwf id
+    | branch c0 entries =>
+      have hwf' := hwf
+      obtain ⟨hs, hb, hlen, hmin, hchain⟩ := hwf
+      rw [insertRec]
+      simp only []
+      have hAmem : ∀ e ∈ entries.takeWhile (sepLE k), ¬ k < e.1 := by
+        intro e he
+        have := mem_takeWhile_imp he
+        simpa [sepLE] using this
+      have hBhead : ∀ e, (entries.dropWhile (sepLE k)).head? = some e → k < e.1 := by
+        intro e he
+        have := head_dropWhile_false he
+        simpa [sepLE] using this
+      have hAB : entries = entries.takeWhile (sepLE k) ++ entries.dropWhile (sepLE k) :=
+        List.takeWhile_append_dropWhile.symm
+      generalize hA : entries.takeWhile (sepLE k) = A at *
+      generalize hB : entries.dropWhile (sepLE k) = B at *
+      subst hAB
+      have hchild := chain_split _ A B lo hi c0 hchain
+      have hkC : InBounds (lastBound lo A) (headBound hi B) k := by
+        constructor
+        · intro l0 hl0
+          rcases lastBound_mem lo A l0 hl0 with ⟨_, hl⟩ | ⟨c, hc⟩
+          · exact hk.1 l0 hl
+          · exact not_lt.mp (hAmem (l0, c) hc)
+        · intro h0 hh0
+          cases B with
+          | nil => exact hk.2 h0 hh0
+          | cons e rest =>
+            simp only [headBound, Option.some.injEq] at hh0
+            subst hh0
+            exact hBhead e rfl
+      obtain ⟨hfront, hsuffix⟩ := front_lt_of_route hs hb hchain hkC
+      have hrec := ih (lastChild c0 A) false _ _ hchild hkC
+      have hwrec := insertRec_wf lc bc hlc hbc k v h (lastChild c0 A) false _ _ hchild hkC
+      have htl := toList_branch_split c0 A B
+      -- The inserted list, in the shape every outcome reduces to.
+      have hspec : insertSorted k v (Node.branch c0 (A ++ B)).toList =
+          frontList c0 A ++ insertSorted k v (lastChild c0 A).toList ++ entriesToList B := by
+        rw [htl, List.append_assoc, insertSorted_append_left _ _ hfront,
+          insertSorted_append_right _ _ hsuffix, List.append_assoc]
+      have habs_all : (∀ e ∈ (lastChild c0 A).toList, e.1 ≠ k) →
+          ∀ e ∈ (Node.branch c0 (A ++ B)).toList, e.1 ≠ k := by
+        intro hc e he
+        rw [htl] at he
+        simp only [List.mem_append] at he
+        rcases he with (he | he) | he
+        · exact ne_of_lt (hfront e he)
+        · exact hc e he
+        · exact (ne_of_lt (hsuffix e he)).symm
+      rcases hres : insertRec lc bc k v (lastChild c0 A) with ⟨c', old⟩ | ⟨cl, sep, cr⟩ <;>
+        simp only [hres] at hrec hwrec ⊢
+      · obtain ⟨heq, hsome, hnone⟩ := hrec
+        refine ⟨?_, ?_, fun hn => habs_all (hnone hn)⟩
+        · rw [toList_branch_split, frontList_replaceLast, lastChild_replaceLast, heq, hspec]
+        · intro o ho
+          rw [htl]
+          exact List.mem_append_left _ (List.mem_append_right _ (hsome o ho))
+      · obtain ⟨heq, habs⟩ := hrec
+        obtain ⟨hwl, hwr, hstrict⟩ := hwrec
+        have hkeysA := replaceLast_keys c0 A
+        have hlenA := replaceLast_length c0 A
+        have hkeys : (A ++ B).map Prod.fst =
+            ((replaceLast c0 A cl).2 ++ B).map Prod.fst := by
+          simp [hkeysA cl]
+        have hs' : Sorted ((replaceLast c0 A cl).2 ++ B) := sorted_of_keys_eq hkeys hs
+        have hfit : SepFits ((replaceLast c0 A cl).2 ++ B) A.length sep :=
+          sepFits_of_strict hs (hkeysA cl) hstrict
+        have hidx : A.length ≤ ((replaceLast c0 A cl).2 ++ B).length := by
+          simp [hlenA cl]
+        have hlen' : ((replaceLast c0 A cl).2 ++ B).length ≤ bc := by
+          simp only [List.length_append, hlenA cl] at hlen ⊢; exact hlen
+        have hins : insertAt ((replaceLast c0 A cl).2 ++ B) A.length (sep, cr) =
+            (replaceLast c0 A cl).2 ++ (sep, cr) :: B := by
+          rw [← hlenA cl, insertAt_append]
+        -- The whole entry list after absorbing the split, as a flat list.
+        have hflat : (Node.branch (replaceLast c0 A cl).1
+              ((replaceLast c0 A cl).2 ++ (sep, cr) :: B)).toList =
+            insertSorted k v (Node.branch c0 (A ++ B)).toList := by
+          rw [toList_branch_split, frontList_replaceLast, lastChild_replaceLast, hspec, ← heq]
+          simp only [entriesToList, List.append_assoc]
+        rcases hbr : branchApplySplit bc ⟨(replaceLast c0 A cl).1, (replaceLast c0 A cl).2 ++ B⟩
+            A.length sep cr with ⟨b⟩ | ⟨l, pk, r⟩ <;> simp only []
+        · obtain ⟨hc0, hent, _, _, _⟩ := branchApplySplit_noSplit hs' hfit hidx hbr
+          simp only at hc0 hent
+          rw [hins] at hent
+          refine ⟨?_, (fun o ho => by cases ho), fun _ => habs_all habs⟩
+          rw [hc0, hent, hflat]
+        · obtain ⟨_, _, _, _, _, _, _, _, hlc0, hent⟩ :=
+            branchApplySplit_split (by omega) hs' hfit hidx hlen' hbr
+          simp only at hlc0 hent
+          rw [hins] at hent
+          refine ⟨?_, habs_all habs⟩
+          rw [← hflat, ← hent, ← hlc0]
+          simp only [Node.toList, entriesToList_append, entriesToList, List.append_assoc]
+
+/-- `insert` refines `insertSorted` through `toList`, and returns the value
+previously stored under the key, if any. -/
+theorem insertTree_toList (lc bc : Nat) (hlc : 2 ≤ lc) (hbc : 2 ≤ bc) (h : Nat)
+    (root : Node K V) (k : K) (v : V) (hwf : WF lc bc h true none none root) :
+    (insertTree lc bc root k v).1.toList = insertSorted k v root.toList ∧
+      (∀ o, (insertTree lc bc root k v).2 = some o → (k, o) ∈ root.toList) ∧
+      ((insertTree lc bc root k v).2 = none → ∀ e ∈ root.toList, e.1 ≠ k) := by
+  have hk : InBounds (K := K) none none k :=
+    ⟨(fun _ hl => by cases hl), (fun _ hh => by cases hh)⟩
+  have := insertRec_toList lc bc hlc hbc k v h root true none none hwf hk
+  unfold insertTree
+  rcases hres : insertRec lc bc k v root with ⟨n, old⟩ | ⟨l, sep, r⟩ <;> simp only [hres] at this ⊢
+  · exact this
+  · obtain ⟨heq, habs⟩ := this
+    refine ⟨?_, (fun o ho => by cases ho), fun _ => habs⟩
+    simp only [growRoot, Node.toList, entriesToList, List.append_nil]
+    exact heq
 
 end WF
 
