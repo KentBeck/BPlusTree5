@@ -86,11 +86,8 @@ function one-to-one, same name, same arithmetic:
   `fix_branch_child` turns a child merge into a parent underflow.
 - `check_root_collapse` / `consolidate_root_children` / `replace_root`.
 
-The Rust `insert` descends iteratively with a recorded path and unwinds
-splits bottom-up. The model's `insert` is a direct recursion (the shape
-`insert_rec` had before commit 1f54f7d). Either keep that gap and prove
-one lemma that the path-array loop computes the recursive fold, or make
-the Rust recursive again (see "Open decisions").
+`insert_rec` and `remove_rec` are both direct recursions, so the model's
+`insert` and `remove` port them one-to-one with no bridging lemma.
 
 Keeping names aligned is what makes the "the Lean matches the Rust" step
 reviewable by eye; do not refactor the model into something prettier
@@ -156,11 +153,13 @@ In this order, because difficulty rises sharply:
 Reading the code for this plan surfaced items that the proof will force
 a decision on; each is either a theorem or a code change.
 
-1. **`MAX_DEPTH = 64` is guarded only by a `debug_assert`.** In release,
-   a deeper tree writes past the path array. Non-root branches hold
-   `≥ 2` keys, so leaf count grows as `3^(depth - 2)`, and depth 64 is
-   unreachable for any addressable tree. Prove
-   `depth t ≤ log₃ (leafCount t) + 2` and cite it at the array.
+1. **Depth bound.** Insert used to record its descent in a fixed
+   64-slot array guarded only by a `debug_assert`; a deeper tree would
+   have written past it in release. Insert is recursive again, so the
+   array is gone, but the theorem is still worth having: non-root
+   branches hold `≥ 2` keys, so leaf count grows as `3^(depth - 2)`, and
+   `depth t ≤ log₃ (leafCount t) + 2` bounds the recursion depth of both
+   `insert_rec` and `remove_rec`.
 2. **Defensive paths with unclear reachability.** `fix_branch_child`
    clamps `child_idx` to `len` and tolerates a null child;
    `plan_rebalance` and `child_len` treat a null sibling as length 0;
@@ -175,11 +174,14 @@ a decision on; each is either a theorem or a code change.
 
 ## Open decisions
 
-- **Iterative vs recursive insert.** Recursive matches `remove_rec` and
-  the model one-to-one and removes the fixed path array. Iterative was
-  measured at 13.6% fewer instructions but wall-clock neutral (commit
-  1f54f7d). Recommendation: recursive, decided on symmetry rather than
-  proof needs, with an A/B measurement in the commit.
+- ~~**Iterative vs recursive insert.**~~ — DECIDED: recursive. It
+  matches `remove_rec` and the model one-to-one and removes the fixed
+  path array. Measured on the switch back (cachegrind, 200k
+  hash-scattered inserts at cap 128): 7.3% more instructions
+  (89.1M → 95.6M), identical D1 and LL misses, and an interleaved
+  wall-clock A/B of 2M inserts within noise (medians 0.587s vs 0.589s).
+  Same conclusion as the original switch in the other direction: insert
+  is miss-bound, and the instruction count does not reach the clock.
 - **Mathlib or plain Std.** Mathlib gives `LinearOrder` and sorted-list
   lemmas for free; Std keeps the dependency light and matches
   `Std.TreeMap`'s proofs. Start with Std and add Mathlib only if the

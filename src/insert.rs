@@ -24,9 +24,6 @@ impl<K: Ord + Clone, V> BPlusTreeMap<K, V> {
     }
 
     fn insert_inner(&mut self, key: K, value: V) -> Option<V> {
-        // 64 levels is unreachable for any branch fanout >= 2.
-        const MAX_DEPTH: usize = 64;
-
         let root = match self.root {
             Some(p) => p,
             None => unsafe { alloc_leaf_block(&self.leaf_layout).expect("alloc leaf") },
@@ -35,69 +32,54 @@ impl<K: Ord + Clone, V> BPlusTreeMap<K, V> {
             self.root = Some(root);
         }
 
-        unsafe {
-            // Iterative descent, recording (branch, child_idx) for the way up.
-            let mut path: [core::mem::MaybeUninit<(NonNull<u8>, usize)>; MAX_DEPTH] =
-                [core::mem::MaybeUninit::uninit(); MAX_DEPTH];
-            let mut depth = 0usize;
-            let mut node = root;
-            loop {
-                let hdr = &*(node.as_ptr() as *const NodeHdr);
-                match hdr.tag {
-                    NodeTag::Leaf => break,
-                    NodeTag::Branch => {
-                        let (child, child_idx) =
-                            self.child_for_key(node, &key).expect("child must exist");
-                        debug_assert!(depth < MAX_DEPTH);
-                        path[depth].write((node, child_idx));
-                        depth += 1;
-                        node = child;
-                    }
-                }
+        match unsafe { self.insert_rec(root, key, value) } {
+            InsertResult::NoSplit(old) => old,
+            InsertResult::Split {
+                sep_key,
+                right,
+                old_value,
+            } => {
+                // The root itself split: grow the tree by one level.
+                unsafe { self.grow_root(root, sep_key, right) };
+                old_value
             }
+        }
+    }
 
-            let mut res = self.leaf_insert_or_split(node, key, value);
-
-            // Apply split fixups bottom-up; stop as soon as a level absorbs it.
-            while depth > 0 {
-                match res {
-                    InsertResult::NoSplit(old) => return old,
+    /// Insert below `node`; on a split, hand the separator and new right
+    /// sibling up for the parent to absorb. Mirror of `remove_rec`: descend
+    /// on the way down, repair on the way up. Depth is logarithmic in the
+    /// entry count (non-root branches hold at least two keys), so the
+    /// recursion is shallow.
+    unsafe fn insert_rec(&mut self, node: NonNull<u8>, key: K, value: V) -> InsertResult<K, V> {
+        let hdr = &*(node.as_ptr() as *const NodeHdr);
+        match hdr.tag {
+            NodeTag::Leaf => self.leaf_insert_or_split(node, key, value),
+            NodeTag::Branch => {
+                let (child, child_idx) = self.child_for_key(node, &key).expect("child must exist");
+                match self.insert_rec(child, key, value) {
+                    InsertResult::NoSplit(old) => InsertResult::NoSplit(old),
                     InsertResult::Split {
                         sep_key,
                         right,
                         old_value,
-                    } => {
-                        depth -= 1;
-                        let (branch, child_idx) = path[depth].assume_init();
-                        res = self.branch_apply_split(branch, child_idx, sep_key, right, old_value);
-                    }
-                }
-            }
-
-            match res {
-                InsertResult::NoSplit(old) => old,
-                InsertResult::Split {
-                    sep_key,
-                    right,
-                    old_value,
-                } => {
-                    // The root itself split: grow the tree by one level.
-                    let old_root = self.root.expect("root exists");
-                    let branch =
-                        alloc_branch_block(&self.branch_layout).expect("alloc new root branch");
-                    let b = layout::carve_branch::<K>(branch, &self.branch_layout);
-                    let bhdr = &mut *b.hdr;
-                    bhdr.len = 1;
-                    self.write_key_at(b.keys_ptr as *mut K, 0, sep_key);
-                    let c0 = b.children_ptr as *mut *mut u8;
-                    let c1 = c0.add(1);
-                    *c0 = old_root.as_ptr();
-                    *c1 = right.as_ptr();
-                    self.root = Some(branch);
-                    old_value
+                    } => self.branch_apply_split(node, child_idx, sep_key, right, old_value),
                 }
             }
         }
+    }
+
+    /// Replace the root with a new branch holding `sep_key` between the old
+    /// root and `right`. Inverse of `replace_root` in delete.
+    unsafe fn grow_root(&mut self, old_root: NonNull<u8>, sep_key: K, right: NonNull<u8>) {
+        let branch = alloc_branch_block(&self.branch_layout).expect("alloc new root branch");
+        let b = layout::carve_branch::<K>(branch, &self.branch_layout);
+        (*b.hdr).len = 1;
+        self.write_key_at(b.keys_ptr as *mut K, 0, sep_key);
+        let children = b.children_ptr as *mut *mut u8;
+        *children = old_root.as_ptr();
+        *children.add(1) = right.as_ptr();
+        self.root = Some(branch);
     }
 
     pub fn batch_insert(&mut self, items: Vec<(K, V)>) -> BTreeResult<Vec<Option<V>>> {

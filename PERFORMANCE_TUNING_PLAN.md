@@ -139,6 +139,13 @@ b. ~~**Iterative descent.**~~ — DONE. `insert()` now descends iteratively,
    memory-bound (~17 D1 misses per insert, unchanged); the instruction win
    is real but hidden behind stalls. Bonus: no unbounded recursion.
 
+   **Reverted** (see LEAN_VERIFICATION_PLAN.md): insert is recursive
+   again so it mirrors `remove_rec` and the Lean model, and the fixed
+   64-slot path array is gone. Re-measured on the way back: +7.3%
+   instructions (89.1M → 95.6M), identical D1/LL misses, wall clock
+   within noise on an interleaved A/B. Recursion depth is logarithmic in
+   the entry count, so it was never unbounded in practice.
+
    **Key diagnosis from the cache simulation: random insert is D1-miss
    bound, not instruction bound.** Instruction-shaving alone won't move
    wall time; reducing misses per operation is the lever.
