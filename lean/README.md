@@ -30,6 +30,11 @@ link a reviewer checks by eye.
 | promotion in `branch_insert_and_split` (key up, child becomes `children[0]`) | `branchInsertAndSplit` | see the split theorem |
 | `branch_apply_split` | `branchApplySplit` | `branchApplySplit_noSplit`, `branchApplySplit_split` |
 | `grow_root` | `growRoot` | `growRoot_spec` |
+| node kinds (`NodeTag::Leaf` / `Branch`) | `Node` (`Model/Tree.lean`) | |
+| `child_for_key` (child after the last separator `≤ k`) | `takeWhile (sepLE k)` + `lastChild` | the picked child's bounds contain `k` |
+| `insert_rec` | `insertRec` | `insertRec_wf` |
+| `insert` (with root growth) | `insertTree` | `insertTree_wf` |
+| `check_invariants_detailed` bounds, order, fill; plus uniform leaf depth | `WF` (`Proofs/Tree.lean`) | preserved by insert |
 
 What the two main theorems say, given a sorted leaf within capacity:
 
@@ -56,6 +61,16 @@ fits strictly between the entries on either side of the split child
   concatenate to the old entries with the new one inserted.
 - `grow_root`: a one-entry branch over the old root and the new sibling.
 
-Not modelled here: the tree type that ties leaves and branches together
-(so that `SepFits` is discharged from the child's bounds), node memory,
-and sibling pointers. Those are the next phases.
+The tree-level theorem `insertRec_wf` composes the two. `WF h isRoot lo hi
+n` says: keys strictly increasing in every node, every key inside the
+bounds the ancestors' separators impose, fill between `cap / 2` and `cap`
+except at the root, and every leaf at height 0 (so all leaves at one
+depth, which the Rust checker does not test). Insert preserves it at the
+same height, or, when the root splits, one higher. Along the way the
+branch theorems' `SepFits` is discharged: the split child's new separator
+lies strictly inside that child's slot bounds, which are the neighbouring
+separators.
+
+Not modelled here: `toList` and the functional spec (insert = sorted
+insert), `remove`, `range`, node memory, and sibling pointers. Those are
+the next phases.

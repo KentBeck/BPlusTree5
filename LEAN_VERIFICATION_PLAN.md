@@ -93,10 +93,10 @@ Keeping names aligned is what makes the "the Lean matches the Rust" step
 reviewable by eye; do not refactor the model into something prettier
 than the code until the code has been refactored to match.
 
-**Status:** `lean/BPlusTree/Model/Leaf.lean` and `Model/Branch.lean`
-port `insert.rs` node by node (`leafInsertOrSplit`, `branchApplySplit`,
-`branchInsertAndSplit`, `growRoot`). The tree type that composes them,
-delete, and range are not started.
+**Status:** `lean/BPlusTree/Model/Leaf.lean`, `Model/Branch.lean`, and
+`Model/Tree.lean` port `insert.rs` in full (`leafInsertOrSplit`,
+`branchApplySplit`, `branchInsertAndSplit`, `growRoot`, `insertRec`,
+`insertTree`). `toList`, delete, and range are not started.
 
 ## Phase 2b — the heap model (memory safety)
 
@@ -156,6 +156,10 @@ complements this plan.
 4. **Uniform depth**: every leaf sits at the same depth.
 5. **Count**: `count = length (toList t)`.
 
+**Status:** `WF` is defined in `lean/BPlusTree/Proofs/Tree.lean` with
+items 1–4 (indexed by height, so item 4 is built in); item 5 waits on
+`toList`. The checker equivalence below is not started.
+
 Then prove `check_invariants_detailed t = ok ↔ WF t` (minus item 4, which
 the Rust checker does not test; see below). That ties the proof to the
 fuzzer, which runs the checker after every mutation. The leaf sibling
@@ -186,10 +190,15 @@ In this order, because difficulty rises sharply:
      sorted with `cap / 2 ≤ len ≤ cap` for every `cap ≥ 1`, the promoted
      key strictly between them, the first child kept on the left, and the
      entries preserved as a sequence. `branchApplySplit_noSplit` covers
-     the absorb arm and `growRoot_spec` root growth. The branch theorems
-     take `SepFits` (the separator sits strictly between the neighbouring
-     entries) as a hypothesis; the tree model discharges it from the
-     split child's bounds.
+     the absorb arm and `growRoot_spec` root growth.
+   - ~~whole-tree insert~~ — DONE (`lean/BPlusTree/Proofs/Tree.lean`).
+     `insertRec_wf`, by induction on height: a `NoSplit` result is `WF`
+     at the same height and bounds; a `Split` result is two `WF`
+     non-root halves around a separator strictly inside the bounds. That
+     strictness is what discharges the branch theorems' `SepFits` at the
+     parent. `insertTree_wf` adds root growth. Still open for insert: the
+     `toList` refinement (insert = sorted insert) and the returned old
+     value.
 3. `range` bound resolution: `cut_in_leaf` with `after_equal`, the
    hop to the next/previous leaf when the cut sits at an edge, and the
    inverted-bounds check in `make_items`. Double-ended iteration:
@@ -277,12 +286,13 @@ lean/
   lakefile.toml, lean-toolchain, README.md (correspondence table)
   BPlusTree/Model/Leaf.lean     -- leaf half of insert.rs (done)
   BPlusTree/Model/Branch.lean   -- branch half, root growth (done)
-  BPlusTree/Model/Tree.lean     -- Node, Tree, toList
+  BPlusTree/Model/Tree.lean     -- Node, insertRec, insertTree (done); toList
   BPlusTree/Model/Heap.lean     -- Phase 2b
   BPlusTree/Proofs/Leaf.lean    -- leaf split and insert theorems (done)
   BPlusTree/Proofs/Branch.lean  -- branch split, apply-split, root growth (done)
-  BPlusTree/Proofs/WF.lean      -- the invariant, checker equivalence
-  BPlusTree/Proofs/Insert.lean  -- Phase 4.2
+  BPlusTree/Proofs/Tree.lean    -- WF, chains, insert preserves WF (done)
+  BPlusTree/Proofs/WF.lean      -- checker equivalence
+  BPlusTree/Proofs/Insert.lean  -- Phase 4.2 toList refinement
   BPlusTree/Proofs/Range.lean   -- Phase 4.3
   BPlusTree/Proofs/Remove.lean  -- Phase 4.4
   BPlusTree/Proofs/Depth.lean   -- finding 1

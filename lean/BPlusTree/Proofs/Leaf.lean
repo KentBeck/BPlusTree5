@@ -43,6 +43,14 @@ theorem replaceAt_append (A B : List α) (x : α) :
   simp only [replaceAt, List.take_append_length, List.drop_append]
   simp
 
+theorem mem_insertAt {l : List α} {i : Nat} {x e : α} (h : e ∈ insertAt l i x) :
+    e = x ∨ e ∈ l := by
+  simp only [insertAt, List.mem_append, List.mem_cons] at h
+  rcases h with h | h | h
+  · exact Or.inr (List.mem_of_mem_take h)
+  · exact Or.inl h
+  · exact Or.inr (List.mem_of_mem_drop h)
+
 theorem getElem?_append_length (A B : List α) : (A ++ B)[A.length]? = B.head? := by
   rw [List.getElem?_append_right (Nat.le_refl _), Nat.sub_self]
   cases B <;> rfl
@@ -144,7 +152,8 @@ theorem leafInsertOrSplit_noSplit {cap : Nat} {leaf leaf' : Leaf K V} {k : K} {v
     (h : leafInsertOrSplit cap leaf k v = .noSplit leaf' old) :
     Sorted leaf' ∧ leaf'.length ≤ cap ∧
       (∀ o, old = some o → (k, o) ∈ leaf ∧ leaf'.length = leaf.length) ∧
-      (old = none → (∀ e ∈ leaf, e.1 ≠ k) ∧ leaf'.length = leaf.length + 1) := by
+      (old = none → (∀ e ∈ leaf, e.1 ≠ k) ∧ leaf'.length = leaf.length + 1) ∧
+      (∀ e ∈ leaf', e = (k, v) ∨ e ∈ leaf) := by
   obtain ⟨A, B, rfl, hidx, hA, hB⟩ := lowerBound_spec leaf k hs
   simp only [leafInsertOrSplit, leafInsertOrSplit.insertOrSplit, hidx,
     getElem?_append_length] at h
@@ -158,11 +167,16 @@ theorem leafInsertOrSplit_noSplit {cap : Nat} {leaf leaf' : Leaf K V} {k : K} {v
       cases h
       rw [insertAt_append]
       simp only [List.length_append, List.length_nil] at hlt
-      refine ⟨sorted_append_cons hs hA (by simp), by simp; omega, ?_, ?_⟩
+      refine ⟨sorted_append_cons hs hA (by simp), by simp; omega, ?_, ?_, ?_⟩
       · intro o ho; cases ho
       · intro _
         refine ⟨?_, by simp <;> omega⟩
         intro e he; exact ne_of_lt (hA e (by simpa using he))
+      · intro x hx
+        simp only [List.mem_append, List.mem_cons, List.not_mem_nil, or_false] at hx ⊢
+        rcases hx with hx | hx
+        · exact Or.inr hx
+        · exact Or.inl hx
     · exact absurd h (leafSplitInsert_ne_noSplit _ _ _ _ _ _)
   | cons e B =>
     simp only [List.head?_cons] at h
@@ -175,7 +189,7 @@ theorem leafInsertOrSplit_noSplit {cap : Nat} {leaf leaf' : Leaf K V} {k : K} {v
         rw [insertAt_append]
         have hgt := forall_gt_of_head_gt hsB hke
         simp only [List.length_append, List.length_cons] at hlt
-        refine ⟨sorted_append_cons hs hA hgt, by simp; omega, ?_, ?_⟩
+        refine ⟨sorted_append_cons hs hA hgt, by simp; omega, ?_, ?_, ?_⟩
         · intro o ho; cases ho
         · intro _
           refine ⟨?_, by simp <;> omega⟩
@@ -183,6 +197,12 @@ theorem leafInsertOrSplit_noSplit {cap : Nat} {leaf leaf' : Leaf K V} {k : K} {v
           rcases List.mem_append.mp hx with hx | hx
           · exact ne_of_lt (hA x hx)
           · exact (ne_of_lt (hgt x hx)).symm
+        · intro x hx
+          simp only [List.mem_append, List.mem_cons] at hx ⊢
+          rcases hx with hx | hx | hx
+          · exact Or.inr (Or.inl hx)
+          · exact Or.inl hx
+          · exact Or.inr (Or.inr hx)
       · exact absurd h (leafSplitInsert_ne_noSplit _ _ _ _ _ _)
     · -- `¬ k < e.1`, and `¬ e.1 < k` from the cut: the key is `e.1`.
       rename_i hke
@@ -196,7 +216,7 @@ theorem leafInsertOrSplit_noSplit {cap : Nat} {leaf leaf' : Leaf K V} {k : K} {v
       have hs' : Sorted (A ++ B) :=
         hs.sublist ((List.Sublist.refl A).append (List.sublist_cons_self e B))
       simp only [Sorted, List.pairwise_cons] at hsB
-      refine ⟨?_, by simpa using hlen, ?_, ?_⟩
+      refine ⟨?_, by simpa using hlen, ?_, ?_, ?_⟩
       · refine sorted_append_cons hs' hA ?_
         intro b hb; simpa [hek] using hsB.1 b hb
       · intro o ho
@@ -205,6 +225,12 @@ theorem leafInsertOrSplit_noSplit {cap : Nat} {leaf leaf' : Leaf K V} {k : K} {v
           rcases e with ⟨ek, ev⟩; simp at hek; simp [hek]
         rw [this]; simp
       · intro hn; cases hn
+      · intro x hx
+        simp only [List.mem_append, List.mem_cons] at hx ⊢
+        rcases hx with hx | hx | hx
+        · exact Or.inr (Or.inl hx)
+        · exact Or.inl hx
+        · exact Or.inr (Or.inr (Or.inr hx))
 
 /-- The `Split` outcome: both halves are sorted and hold between `cap / 2`
 and `cap` entries for every capacity from 2 up (`with_caps` enforces 4);
