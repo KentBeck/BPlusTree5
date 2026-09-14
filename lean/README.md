@@ -24,6 +24,12 @@ link a reviewer checks by eye.
 | `leaf_insert_or_split` | `leafInsertOrSplit` | `leafInsertOrSplit_noSplit`, `leafInsertOrSplit_split` |
 | `validate_leaf_key_order_and_bounds` (strictly increasing) | `Sorted` | preserved by both outcomes |
 | `validate_leaf_occupancy` (`cap / 2 ≤ len ≤ cap`) | length bounds in the split theorem | both halves, for every `cap ≥ 2` |
+| entry view of a branch (`children[0]`, then `(keys[i], children[i+1])`) | `Branch` (`Model/Branch.lean`) | |
+| `branch_open_gap` + writes in `branch_apply_split` | `insertAt` on the entries | sorted given `SepFits` |
+| `left_count` / `left_keep` in `branch_insert_and_split` | `cutInsert` | `cutInsert_eq`: equals "insert, then cut at `(len + 1) / 2`" |
+| promotion in `branch_insert_and_split` (key up, child becomes `children[0]`) | `branchInsertAndSplit` | see the split theorem |
+| `branch_apply_split` | `branchApplySplit` | `branchApplySplit_noSplit`, `branchApplySplit_split` |
+| `grow_root` | `growRoot` | `growRoot_spec` |
 
 What the two main theorems say, given a sorted leaf within capacity:
 
@@ -36,5 +42,20 @@ What the two main theorems say, given a sorted leaf within capacity:
   the two halves concatenated are the old leaf with the new entry
   inserted at its sorted position.
 
-Not modelled here: node memory, sibling pointers, and the parent's
-handling of the split. Those are the next phases.
+What the branch theorems say, given sorted entries and a separator that
+fits strictly between the entries on either side of the split child
+(`SepFits`, which is what a child split provides):
+
+- `NoSplit`: the first child is unchanged, the entries are the old ones
+  with `(sep, right)` inserted at the child's slot, still sorted, one
+  longer, within capacity.
+- `Split`: both halves are sorted and hold between `cap / 2` and `cap`
+  entries for every `cap ≥ 1`; the promoted key is strictly above every
+  left key and strictly below every right key; the left half keeps the
+  first child; and left entries, the promoted entry, and right entries
+  concatenate to the old entries with the new one inserted.
+- `grow_root`: a one-entry branch over the old root and the new sibling.
+
+Not modelled here: the tree type that ties leaves and branches together
+(so that `SepFits` is discharged from the child's bounds), node memory,
+and sibling pointers. Those are the next phases.

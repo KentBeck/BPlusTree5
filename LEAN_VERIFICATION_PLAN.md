@@ -93,9 +93,10 @@ Keeping names aligned is what makes the "the Lean matches the Rust" step
 reviewable by eye; do not refactor the model into something prettier
 than the code until the code has been refactored to match.
 
-**Status:** `lean/BPlusTree/Model/Leaf.lean` ports the leaf half of
-`insert.rs` (`insertAt`, `replaceAt`, `lowerBound`, `leafSplit`,
-`leafInsertOrSplit`). Branch, delete, and range are not started.
+**Status:** `lean/BPlusTree/Model/Leaf.lean` and `Model/Branch.lean`
+port `insert.rs` node by node (`leafInsertOrSplit`, `branchApplySplit`,
+`branchInsertAndSplit`, `growRoot`). The tree type that composes them,
+delete, and range are not started.
 
 ## Phase 2b — the heap model (memory safety)
 
@@ -179,7 +180,16 @@ In this order, because difficulty rises sharply:
      covers the absorb and overwrite arms. The split theorem needs
      `cap ≥ 2` (a one-item leaf would split into an empty right half,
      and the Rust reads its first key); `with_caps` enforces 4.
-   - branch split: after promotion both sides hold `≥ cap / 2` keys.
+   - ~~branch split~~ — DONE (`lean/BPlusTree/Proofs/Branch.lean`).
+     `cutInsert_eq` shows the `left_keep` arithmetic equals "insert, then
+     cut at `(len + 1) / 2`"; `branchApplySplit_split` gives both halves
+     sorted with `cap / 2 ≤ len ≤ cap` for every `cap ≥ 1`, the promoted
+     key strictly between them, the first child kept on the left, and the
+     entries preserved as a sequence. `branchApplySplit_noSplit` covers
+     the absorb arm and `growRoot_spec` root growth. The branch theorems
+     take `SepFits` (the separator sits strictly between the neighbouring
+     entries) as a hypothesis; the tree model discharges it from the
+     split child's bounds.
 3. `range` bound resolution: `cut_in_leaf` with `after_equal`, the
    hop to the next/previous leaf when the cut sits at an edge, and the
    inverted-bounds check in `make_items`. Double-ended iteration:
@@ -266,10 +276,11 @@ for both levels. Nothing here blocks on Rust changes.
 lean/
   lakefile.toml, lean-toolchain, README.md (correspondence table)
   BPlusTree/Model/Leaf.lean     -- leaf half of insert.rs (done)
-  BPlusTree/Model/Branch.lean   -- branch half, root growth
+  BPlusTree/Model/Branch.lean   -- branch half, root growth (done)
   BPlusTree/Model/Tree.lean     -- Node, Tree, toList
   BPlusTree/Model/Heap.lean     -- Phase 2b
   BPlusTree/Proofs/Leaf.lean    -- leaf split and insert theorems (done)
+  BPlusTree/Proofs/Branch.lean  -- branch split, apply-split, root growth (done)
   BPlusTree/Proofs/WF.lean      -- the invariant, checker equivalence
   BPlusTree/Proofs/Insert.lean  -- Phase 4.2
   BPlusTree/Proofs/Range.lean   -- Phase 4.3
