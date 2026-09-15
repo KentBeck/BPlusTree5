@@ -224,10 +224,12 @@ In this order, because difficulty rises sharply:
    DONE for insert (`lean/replay.sh`, `examples/gen_trace.rs`,
    `lean/Replay/Main.lean`). The comparison is on the tree *shape*
    (`dump_shape`: every leaf's entries and every separator, nested), not
-   just the map, at every dump across eight capacity/key-space
-   configurations; 99k inserts and 19k shape checks run in about six
-   seconds. CI runs it on every push. Extend the trace format with
-   `R k` and `G k` as the model gains `remove` and `get`.
+   just the map, across eight capacity/key-space configurations. Checks
+   are 64-bit FNV-1a digests of the shape (small traces, frequent
+   checks) with one full shape at the end; on a mismatch the driver
+   reruns the generator to print both shapes at the failing op. CI runs
+   it on every push. Extend the trace format with `R k` and `G k` as the
+   model gains `remove` and `get`.
 2. Cite proofs from the code: a one-line comment at each Rust site that
    a lemma justifies (split arithmetic, merge fit, the depth bound).
 3. Add the uniform-depth check to `check_invariants_detailed` (cheap:

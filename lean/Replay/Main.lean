@@ -9,16 +9,31 @@ tree's shape at every dump line. Equal shapes at every dump across the
 fuzz configurations is the evidence that the model is the code: same
 splits, same separators, same leaf contents, not just the same map.
 
-Trace format (one op or dump per line):
+Trace format (one op or check per line):
 
     CAPS <leaf_cap> <branch_cap>
     I <key> <value>
+    # <fnv1a-64 of the shape, 16 hex digits>
     = <shape>
 
 Shapes: a leaf is `(k:v k:v ...)`, a branch is `[child sep child ...]`.
+Digest lines are the cheap, frequent check; a full shape line normally
+appears only at the end of a trace. On a digest mismatch this tool prints
+the model's shape, and `lean/replay.sh` reruns the generator to print the
+Rust shape at the same operation.
 -/
 
 open BPlusTree
+
+/-- 64-bit FNV-1a over the UTF-8 bytes, matching `ShapeHasher` in
+`src/common.rs`. -/
+def fnv1a (s : String) : UInt64 :=
+  s.toUTF8.foldl (fun h b => (h ^^^ b.toUInt64) * 0x0000_0100_0000_01b3) 0xcbf2_9ce4_8422_2325
+
+/-- Sixteen lowercase hex digits, as Rust's `{:016x}` prints. -/
+def hex16 (x : UInt64) : String :=
+  let digits := String.ofList (Nat.toDigits 16 x.toNat)
+  "".pushn '0' (16 - digits.length) ++ digits
 
 /-- The same rendering as the Rust `dump_shape`. -/
 partial def shape : Node Int Int → String
@@ -48,6 +63,14 @@ def replayFile (path : System.FilePath) : IO Outcome := do
     | ["I", k, v] =>
       root := (insertTree lc bc root k.toInt! v.toInt!).1
       ops := ops + 1
+    | ["#", expected] =>
+      let got := hex16 (fnv1a (shape root))
+      if got == expected then
+        checks := checks + 1
+      else
+        IO.eprintln s!"{path}:{lineNo}: shape digest mismatch after {ops} ops (rust {expected}, lean {got})"
+        IO.eprintln s!"  lean shape: {shape root}"
+        return { ok := false, ops, checks }
     | "=" :: rest =>
       let expected := " ".intercalate rest
       let got := shape root
@@ -72,7 +95,7 @@ def main (args : List String) : IO UInt32 := do
   for path in args do
     let r ← replayFile path
     if r.ok then
-      IO.println s!"{path}: OK ({r.ops} ops, {r.checks} shape checks)"
+      IO.println s!"{path}: OK ({r.ops} ops, {r.checks} checks)"
     else
       failed := true
   return if failed then 1 else 0

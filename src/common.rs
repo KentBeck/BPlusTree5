@@ -614,6 +614,45 @@ mod tests {
     }
 }
 
+/// 64-bit FNV-1a over the bytes fed through `fmt::Write`. The Lean replay
+/// computes the same function over the same rendering, so equal digests
+/// mean equal shapes (up to a 2^-64 accidental collision); neither side
+/// is adversarial, so a cryptographic hash would buy nothing here.
+#[cfg(feature = "compat_test_api")]
+pub struct ShapeHasher(u64);
+
+#[cfg(feature = "compat_test_api")]
+impl ShapeHasher {
+    pub const OFFSET: u64 = 0xcbf2_9ce4_8422_2325;
+    pub const PRIME: u64 = 0x0000_0100_0000_01b3;
+
+    pub fn new() -> Self {
+        ShapeHasher(Self::OFFSET)
+    }
+
+    pub fn finish(&self) -> u64 {
+        self.0
+    }
+}
+
+#[cfg(feature = "compat_test_api")]
+impl Default for ShapeHasher {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+#[cfg(feature = "compat_test_api")]
+impl core::fmt::Write for ShapeHasher {
+    fn write_str(&mut self, s: &str) -> core::fmt::Result {
+        for b in s.bytes() {
+            self.0 ^= b as u64;
+            self.0 = self.0.wrapping_mul(Self::PRIME);
+        }
+        Ok(())
+    }
+}
+
 #[cfg(feature = "compat_test_api")]
 impl<K: Ord + Clone + core::fmt::Debug, V: core::fmt::Debug> BPlusTreeMap<K, V> {
     /// Render the tree's shape for the Lean replay harness (`lean/Replay`).
@@ -622,35 +661,47 @@ impl<K: Ord + Clone + core::fmt::Debug, V: core::fmt::Debug> BPlusTreeMap<K, V> 
     /// tree the same way, so equal strings mean equal shapes.
     pub fn dump_shape(&self) -> String {
         let mut out = String::new();
-        match self.root {
-            Some(root) => unsafe { self.dump_node(root, &mut out) },
-            None => out.push_str("()"),
-        }
+        self.render_shape(&mut out);
         out
     }
 
-    unsafe fn dump_node(&self, node: NonNull<u8>, out: &mut String) {
-        use core::fmt::Write;
+    /// FNV-1a digest of `dump_shape()`, computed without building the string.
+    pub fn shape_hash(&self) -> u64 {
+        let mut h = ShapeHasher::new();
+        self.render_shape(&mut h);
+        h.finish()
+    }
+
+    fn render_shape<W: core::fmt::Write>(&self, out: &mut W) {
+        match self.root {
+            Some(root) => unsafe { self.dump_node(root, out) },
+            None => {
+                let _ = out.write_str("()");
+            }
+        }
+    }
+
+    unsafe fn dump_node<W: core::fmt::Write>(&self, node: NonNull<u8>, out: &mut W) {
         let hdr = &*(node.as_ptr() as *const NodeHdr);
         match hdr.tag {
             NodeTag::Leaf => {
                 let parts = layout::carve_leaf::<K, V>(node, &self.leaf_layout);
                 let len = (*parts.hdr).len as usize;
-                out.push('(');
+                let _ = out.write_char('(');
                 for i in 0..len {
                     if i > 0 {
-                        out.push(' ');
+                        let _ = out.write_char(' ');
                     }
                     let k = &*(parts.keys_ptr.add(i) as *const K);
                     let v = &*(parts.vals_ptr.add(i) as *const V);
                     let _ = write!(out, "{:?}:{:?}", k, v);
                 }
-                out.push(')');
+                let _ = out.write_char(')');
             }
             NodeTag::Branch => {
                 let parts = layout::carve_branch::<K>(node, &self.branch_layout);
                 let len = (*parts.hdr).len as usize;
-                out.push('[');
+                let _ = out.write_char('[');
                 for i in 0..=len {
                     if i > 0 {
                         let k = &*(parts.keys_ptr.add(i - 1) as *const K);
@@ -658,10 +709,12 @@ impl<K: Ord + Clone + core::fmt::Debug, V: core::fmt::Debug> BPlusTreeMap<K, V> 
                     }
                     match NonNull::new(*(parts.children_ptr.add(i) as *const *mut u8)) {
                         Some(child) => self.dump_node(child, out),
-                        None => out.push_str("null"),
+                        None => {
+                            let _ = out.write_str("null");
+                        }
                     }
                 }
-                out.push(']');
+                let _ = out.write_char(']');
             }
         }
     }

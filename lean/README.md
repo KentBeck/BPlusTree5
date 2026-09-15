@@ -13,11 +13,17 @@ only core `Std`). CI runs it on every push.
 `./lean/replay.sh` (from the repo root) builds `examples/gen_trace.rs`,
 runs eight insert-only configurations against the Rust tree (leaf and
 branch capacities from 4×4 to 32×256, key spaces from heavy-duplicate to
-sparse), writes each operation and, at intervals, the tree's shape as
-`dump_shape` renders it, then runs `lake exe replay` on the traces. The
-Lean side replays every operation through `insertTree` and renders its
-tree the same way; any shape difference, at any dump, fails the run with
-the first divergent shape from each side. CI runs it on every push.
+sparse), and writes each operation plus, at intervals, a 64-bit FNV-1a
+digest of the tree's shape as `dump_shape` renders it, with the full
+shape once at the end. `lake exe replay` replays every operation through
+`insertTree`, renders its tree the same way, and compares digests and
+the final shape. Digests keep the traces small, so the large
+configurations check every 10 to 100 operations. On a mismatch the Lean
+side prints its shape and the script reruns the generator to print the
+Rust shape at the same operation, with a token diff. CI runs it on every
+push. FNV rather than a cryptographic hash because neither side is
+adversarial and both implementations are ten lines that can be compared
+by eye.
 
 A shape match is stronger than the differential fuzz's map comparison:
 it checks the same splits, the same separators, and the same leaf
@@ -52,7 +58,7 @@ link a reviewer checks by eye.
 | `insert_rec` | `insertRec` | `insertRec_wf` |
 | `insert` (with root growth) | `insertTree` | `insertTree_wf` |
 | `check_invariants_detailed` bounds, order, fill; plus uniform leaf depth | `WF` (`Proofs/Tree.lean`) | preserved by insert |
-| `dump_shape` (test-only, `compat_test_api`) | `shape` (`Replay/Main.lean`) | compared on every replayed trace |
+| `dump_shape` / `shape_hash` (test-only, `compat_test_api`) | `shape` / `fnv1a` (`Replay/Main.lean`) | compared on every replayed trace |
 | the leaves' entries left to right (what `items()` yields) | `Node.toList` (`Model/Tree.lean`) | `insertTree_toList`: insert = `insertSorted` on it |
 | sorted-association-list insert (the spec) | `insertSorted` (`Model/Spec.lean`) | |
 
