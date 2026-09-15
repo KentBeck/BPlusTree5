@@ -13,3 +13,4 @@ import BPlusTree.Proofs.Tree
 import BPlusTree.Proofs.Delete
 import BPlusTree.Proofs.Read
 import BPlusTree.Proofs.Check
+import BPlusTree.Proofs.Heap

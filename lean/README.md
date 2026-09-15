@@ -198,4 +198,51 @@ carry `entry_count` along with the tree. Not mirrored: the two
 sibling-pointer checks, which have no counterpart in a pointer-free
 model; the replay's range queries are what exercises them.
 
-Not modelled here: node memory and the sibling pointers themselves.
+## The heap model
+
+`Model/Heap.lean` is the lower model the plan's Phase 2b calls for:
+nodes in a store keyed by id (`Std.HashMap`), leaves carrying their
+`prev` / `next` sibling ids, and every operation as explicit state
+passing whose primitives fault (`none`) on a read, write or free of an
+unallocated id or on a violated `debug_assert!` precondition. Node
+contents reuse the tree model's functions; the heap model adds exactly
+the plumbing the tree model abstracts away, at the sites the Rust uses
+it: `alloc_leaf_block` / `alloc_branch_block`, `link_leaf_after` /
+`unlink_leaf`, `free_emptied_leaf` / `free_emptied_branch`,
+`empty_branch`, `replace_root`, `drop_subtree`. `rangeH` walks `next`
+the way `Items::next` does instead of assuming the chain.
+
+The replay runs it beside the tree model on every trace: no operation
+or query may fault, return values must match the Rust, at every digest
+line the store must abstract to the same tree and pass `heapInvOK`
+(store = reachable nodes, no id twice, leaves chained in tree order),
+chain-walking ranges must match the Rust, and dropping the tree at the
+end must leave the store empty. Removing the old-next `prev` update in
+`linkLeafAfter`, or the unlink in `freeEmptiedLeaf`, is caught at the
+first split or the first merge.
+
+What is proved (`Proofs/Heap.lean`):
+
+- The store primitives: what a read sees after a write, an alloc or a
+  free, and that every allocated id stays below `fresh`.
+- `Linked h prev leaves next`, the doubly-linked chain, with its append
+  law and `linkLeafAfter_spec`: exactly which three records change.
+- `insertRecH_sim`, by induction on height: below a well-formed subtree
+  with its leaves chained between two neighbours, `insertRecH` never
+  faults, its result abstracts to the tree model's `insertRec`, the
+  subtree's ids grow by exactly the ids allocated, the new leaves are
+  chained between the same neighbours, and nothing outside the subtree
+  changes except the successor leaf's `prev`.
+- `insertH_sim`: given `HeapInv` (the root's bookkeeping, no id twice,
+  every id below `fresh`, the store holding exactly the reachable ids,
+  the leaves chained end to end, the stored count), `insert` on the heap
+  model never faults, returns what the tree model returns, and
+  re-establishes `HeapInv` for the tree model's new tree. For insert
+  this is no use after free, no double free, no node leak, and
+  sibling-chain integrity.
+
+Not yet proved at this level: `remove` (modelled and replayed; its
+simulation is next), the reads, and the value-token accounting.
+
+Not modelled here: node memory itself, byte offsets, and aliasing, which
+stay with Miri.

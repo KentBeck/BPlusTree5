@@ -148,6 +148,37 @@ theorems it adds:
 The heap model refines the list model by simulation; the list model
 refines the spec as before. Byte-level concerns (offsets in `layout.rs`,
 `ptr::copy` overlap, uninitialised reads, aliasing) stay with Miri.
+
+**Status:** `lean/BPlusTree/Model/Heap.lean` is the model above, with
+explicit state passing (`Option` for a fault) in place of the monad:
+`Heap` is a `Std.HashMap` of `NodeRec` plus `fresh`; leaves carry
+`prev` / `next`; `insertH`, `removeH`, `getH`, `firstH`, `lastH`,
+`rangeH` (which walks `next` the way `Items::next` does) and `clearH`
+mirror the Rust's allocation, linking and freeing sites. The replay runs
+it beside the tree model on every trace: no operation or query faults,
+the store abstracts to the tree model's tree and passes `heapInvOK`
+(store = reachable nodes, none twice, leaves chained in tree order) at
+every check line, chain-walking ranges match the Rust, and dropping the
+tree at the end leaves the store empty.
+
+Proved (`lean/BPlusTree/Proofs/Heap.lean`, about 2,100 lines):
+`insertRecH_sim` and `insertH_sim`. Given `HeapInv` (the root's
+abstraction and id / leaf lists, no id twice, every id below `fresh`,
+the store holding exactly the reachable ids, the leaves `Linked` end to
+end, the stored count), `insert` on the heap model never faults, returns
+what the tree model returns, and re-establishes `HeapInv` for the tree
+model's new tree. That is, for insert: no use after free and no double
+free (every read, write and free hits an allocated id, so `some` on all
+inputs), no node leak (the store's domain is still the reachable set),
+and sibling-chain integrity (the doubly-linked chain is preserved,
+`link_leaf_after` included). The proof is a simulation by induction on
+height with an explicit frame: below a subtree only its own ids and the
+successor leaf's `prev` change.
+
+Not yet proved at this level: `remove` (the model and the replay cover
+it; the simulation, through `fixBranchChildH` and the root collapse, is
+the next step), the reads, and the value-token accounting (no double
+drop of a `K` / `V`).
 Verifying the Rust source itself for memory safety would be Kani
 (bounded model checking of unsafe Rust), a separate item that
 complements this plan.
@@ -341,7 +372,7 @@ lean/
   BPlusTree/Model/Spec.lean     -- insertSorted, the abstract spec (done)
   BPlusTree/Model/Tree.lean     -- Node, toList, insertRec, insertTree (done)
   BPlusTree/Model/Delete.lean   -- delete.rs, node by node (done)
-  BPlusTree/Model/Heap.lean     -- Phase 2b
+  BPlusTree/Model/Heap.lean     -- Phase 2b heap model (done)
   BPlusTree/Proofs/Leaf.lean    -- leaf split and insert theorems (done)
   BPlusTree/Proofs/Branch.lean  -- branch split, apply-split, root growth (done)
   BPlusTree/Proofs/Spec.lean    -- insertSorted lemmas, leaf equations (done)
@@ -352,6 +383,7 @@ lean/
   BPlusTree/Proofs/WF.lean      -- checker equivalence
   BPlusTree/Proofs/Range.lean   -- Phase 4.3
   BPlusTree/Proofs/Depth.lean   -- finding 1
-  BPlusTree/Proofs/Heap.lean    -- Phase 2b theorems
+  BPlusTree/Proofs/Heap.lean    -- Phase 2b: store primitives, chain,
+                                --   insert simulation (done); remove next
   Replay/Main.lean, replay.sh   -- Phase 5.1 shape replay (done)
 ```
