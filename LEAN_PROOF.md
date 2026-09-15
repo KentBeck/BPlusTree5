@@ -200,7 +200,7 @@ and the replay on every push.
 
 | Part | Lines |
 |---|---|
-| Models (`lean/BPlusTree/Model/*.lean`) | about 1,800 |
+| Models (`lean/BPlusTree/Model/*.lean`) | about 1,600 |
 | Tree-model proofs (`Proofs/Spec,Leaf,Branch,Tree,Delete,Read,Check`) | about 4,500 |
 | Heap-model proofs (`Proofs/Heap,HeapRemove,HeapRead,HeapLedger`) | about 6,400 |
 | Replay harness (`Replay/Main.lean`, `examples/gen_trace.rs`) | a few hundred |
