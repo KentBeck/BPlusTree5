@@ -65,7 +65,7 @@ impl<K: Ord + Clone, V> BPlusTreeMap<K, V> {
         match hdr.tag {
             NodeTag::Leaf => self.leaf_insert_or_split(node, key, value),
             NodeTag::Branch => {
-                let (child, child_idx) = self.child_for_key(node, &key).expect("child must exist");
+                let (child, child_idx) = self.child_for_key(node, &key);
                 match self.insert_rec(child, key, value) {
                     InsertResult::NoSplit(old) => InsertResult::NoSplit(old),
                     InsertResult::Split {

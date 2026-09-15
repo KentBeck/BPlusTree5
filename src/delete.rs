@@ -616,7 +616,7 @@ impl<K: Ord + Clone, V> BPlusTreeMap<K, V> {
                 Some(value)
             }
             NodeTag::Branch => {
-                let (child, idx) = self.child_for_key(node, key)?;
+                let (child, idx) = self.child_for_key(node, key);
                 let mut child_underflowed = false;
                 let value = self.remove_rec(child, key, &mut child_underflowed)?;
                 *node_underflowed = child_underflowed && self.fix_branch_child(node, idx);

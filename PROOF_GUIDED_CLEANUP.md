@@ -272,11 +272,13 @@ theorem. Across the commit: 8 files, 151 insertions, 247 deletions, of
 which `delete.rs` was 56 in and 152 out and the Lean model and proofs
 gave up 60 more lines than they gained.
 
-One arm was deliberately left. `child_for_key` in `common.rs` still
-returns an `Option`, because at the time the lookup paths that share it
-were not modelled. They are now (`leafForKeyH_sim` and the read
-simulations), so the same argument applies and the `Option` could go in
-a later pass.
+One arm was deliberately left at the time. `child_for_key` in
+`common.rs` still returned an `Option`, because the lookup paths that
+share it were not yet modelled. Once they were (`leafForKeyH_sim` and the
+read simulations), the same argument applied and the `Option` went too:
+`child_for_key` now returns the child, `leaf_for_key`'s loop is one line,
+and `remove_rec` and `insert_rec` no longer unwrap a value that was
+always there.
 
 ## What to take from it
 

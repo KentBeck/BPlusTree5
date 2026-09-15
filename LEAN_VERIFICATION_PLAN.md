@@ -358,9 +358,9 @@ a decision on; each is either a theorem or a code change.
    now removed (`fix_branch_child` asserts its preconditions,
    `check_root_collapse` is a two-case function, the `RootChild` enum and
    `consolidate_root_children` / `absorb_root_child` are gone) and the
-   model was simplified in step so it still mirrors the code. Still
-   `Option`-shaped for a null child that cannot occur: `child_for_key` in
-   `common.rs`, shared with the unmodelled lookup paths.
+   model was simplified in step so it still mirrors the code. The last
+   such arm, `child_for_key`'s `Option` for a null child, went once the
+   lookup paths were modelled and simulated too.
 3. **The runtime checker never verifies uniform leaf depth.** The model
    proves it; adding the check to the Rust validator is Phase 5.3.
 4. **`min_branch_len`'s `cap <= 2` arm is dead** since `with_caps`

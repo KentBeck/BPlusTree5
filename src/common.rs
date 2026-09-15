@@ -234,12 +234,16 @@ impl<K: Ord, V> BPlusTreeMap<K, V> {
     /// The child after the separators `<= key`. Lean: `lastChild` of the
     /// `sepLE` prefix, the descent `insertRec`, `removeRec` and `leafForKey`
     /// share; `front_lt_of_route` (`Proofs/Tree.lean`) is what it guarantees.
+    /// The slot is never null: a branch holds `len + 1` children and the
+    /// index is at most `len`, and on the heap model the same descent never
+    /// meets a missing node (`insertRecH_sim`, `removeRecH_sim`,
+    /// `leafForKeyH_sim`).
     #[inline(always)]
     pub(crate) unsafe fn child_for_key(
         &self,
         branch: NonNull<u8>,
         key: &K,
-    ) -> Option<(NonNull<u8>, usize)> {
+    ) -> (NonNull<u8>, usize) {
         let parts = layout::carve_branch::<K>(branch, &self.branch_layout);
         let len = (*parts.hdr).len as usize;
         let keys = core::slice::from_raw_parts(parts.keys_ptr as *const K, len);
@@ -247,8 +251,9 @@ impl<K: Ord, V> BPlusTreeMap<K, V> {
             Ok(i) => i + 1,
             Err(i) => i,
         };
+        debug_assert!(child_idx <= len, "child index out of range");
         let child_ptr = *(parts.children_ptr.add(child_idx) as *const *mut u8);
-        NonNull::new(child_ptr).map(|child| (child, child_idx))
+        (NonNull::new_unchecked(child_ptr), child_idx)
     }
 
     /// Lean: `leafForKey_spec` (`Proofs/Read.lean`): the entries split into
@@ -264,13 +269,7 @@ impl<K: Ord, V> BPlusTreeMap<K, V> {
                 let hdr = &*(cur.as_ptr() as *const NodeHdr);
                 match hdr.tag {
                     NodeTag::Leaf => return Some(cur),
-                    NodeTag::Branch => {
-                        if let Some((child, _)) = self.child_for_key(cur, key) {
-                            cur = child;
-                        } else {
-                            return None;
-                        }
-                    }
+                    NodeTag::Branch => cur = self.child_for_key(cur, key).0,
                 }
             }
         }
