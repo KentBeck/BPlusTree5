@@ -5,6 +5,7 @@ import BPlusTree.Model.Tree
 import BPlusTree.Model.Delete
 import BPlusTree.Model.Read
 import BPlusTree.Model.Check
+import BPlusTree.Model.Heap
 import BPlusTree.Proofs.Leaf
 import BPlusTree.Proofs.Spec
 import BPlusTree.Proofs.Branch

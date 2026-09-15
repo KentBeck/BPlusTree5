@@ -50,8 +50,9 @@ def frontList (c : Node K V) : List (K × Node K V) → List (K × V)
   | (_, ch) :: rest => c.toList ++ frontList ch rest
 
 /-- The child that `child_for_key` picks, given the entries whose separator
-is `≤ k`: the last of those entries' children, or `children[0]`. -/
-def lastChild (c : Node K V) : List (K × Node K V) → Node K V
+is `≤ k`: the last of those entries' children, or `children[0]`. Generic
+in the child type so the heap model can use it on node ids. -/
+def lastChild {C : Type} (c : C) : List (K × C) → C
   | [] => c
   | (_, ch) :: rest => lastChild ch rest
 
@@ -62,7 +63,7 @@ def replaceLast (c : Node K V) : List (K × Node K V) → Node K V → Node K V 
   | (s, ch) :: rest, c' =>
     (c, (s, (replaceLast ch rest c').1) :: (replaceLast ch rest c').2)
 
-theorem sizeOf_lastChild (c : Node K V) (A : List (K × Node K V)) :
+theorem sizeOf_lastChild {C : Type} [SizeOf C] (c : C) (A : List (K × C)) :
     sizeOf (lastChild c A) ≤ sizeOf c ∨ sizeOf (lastChild c A) < sizeOf A := by
   induction A generalizing c with
   | nil => left; simp [lastChild]
@@ -91,7 +92,7 @@ variable {K V : Type} [LT K] [LE K] [IsLinearOrder K] [LawfulOrderLT K]
 
 /-- The separator test `child_for_key` routes on: the key goes right of
 every separator that is `≤ k`. -/
-def sepLE (k : K) (e : K × Node K V) : Bool := decide (¬ k < e.1)
+def sepLE {C : Type} (k : K) (e : K × C) : Bool := decide (¬ k < e.1)
 
 /-- `insert_rec`. `lc`/`bc` are the leaf and branch capacities. -/
 def insertRec (lc bc : Nat) (k : K) (v : V) : Node K V → InsertRes K V
