@@ -1262,6 +1262,545 @@ theorem mergeLeafPairH_sim {d : Nat} {h : Heap K V} {id c0 : NodeId} {es : List 
     (by simp) rfl hsame (by simpa using hl') hframe (by simpa using hsucc)
   simpa using this
 
+/-! ### The branch repairs -/
+
+/-- A branch record in entry form, once its children abstract. -/
+theorem absNode_branch_map {d : Nat} {h : Heap K V} {id c0 : NodeId} {es : List (K × NodeId)}
+    (hg : h.get id = some (.branch c0 es))
+    (hall : ∀ c ∈ c0 :: es.map (·.2), ∃ t, absNode d h c = some t) :
+    absNode (d + 1) h id =
+      some (.branch (absF d h c0) (es.map fun e => (e.1, absF d h e.2))) := by
+  rw [absNode_branch hg]
+  obtain ⟨t0, ht0⟩ := hall c0 List.mem_cons_self
+  rw [ht0, Option.bind_some, absEntries_of_all_some (fun e he =>
+    hall e.2 (List.mem_cons_of_mem _ (List.mem_map_of_mem he))), Option.bind_some,
+    absF_of_some ht0]
+
+/-- A branch that abstracts has children that abstract. -/
+theorem abs_branch_children {d : Nat} {h : Heap K V} {id c0 : NodeId} {es : List (K × NodeId)}
+    {t : Node K V} (hg : h.get id = some (.branch c0 es)) (ht : absNode (d + 1) h id = some t) :
+    ∀ c ∈ c0 :: es.map (·.2), ∃ t, absNode d h c = some t := by
+  rw [absNode_branch hg] at ht
+  cases h0 : absNode d h c0 <;> rw [h0] at ht
+  · cases ht
+  · cases he : absNode.absEntries d h es <;> rw [he] at ht
+    · cases ht
+    · intro c hc
+      rcases List.mem_cons.mp hc with rfl | hc
+      · exact ⟨_, h0⟩
+      · obtain ⟨e, he', rfl⟩ := List.mem_map.mp hc
+        exact absEntries_child_some he e he'
+
+/-- Under `h'`, the abstraction of a list of untouched children. -/
+theorem map_absF_congr {d : Nat} {h h' : Heap K V} {cs : List NodeId}
+    (hsame : ∀ c ∈ cs, absNode d h' c = absNode d h c) :
+    cs.map (absF d h') = cs.map (absF d h) :=
+  List.map_congr_left (fun c hc => by simp [absF, hsame c hc])
+
+theorem map_entries_congr {d : Nat} {h h' : Heap K V} {es : List (K × NodeId)}
+    (hsame : ∀ c ∈ es.map (·.2), absNode d h' c = absNode d h c) :
+    (es.map fun e => (e.1, absF d h' e.2)) = es.map fun e => (e.1, absF d h e.2) :=
+  List.map_congr_left (fun e he => by simp [absF, hsame e.2 (List.mem_map_of_mem he)])
+
+/-- Two adjacent branch children of a window: their walks split as
+`a :: LA`, `b :: LB'`; a repair that rewrites only `a`, `b`, `id` leaves
+every grandchild and every leaf in place. -/
+theorem branch_window_facts {d : Nat} {h h' : Heap K V} {id c0 : NodeId} {es : List (K × NodeId)}
+    {csF csB : List NodeId} {a b : NodeId} {LF La Lb LB lvF lva lvb lvB : List NodeId}
+    {prev0 next0 : Option NodeId}
+    (W : WinCtx d h id c0 es csF csB a b LF La Lb LB lvF lva lvb lvB prev0 next0)
+    {lc0 rc0 : NodeId} {les res : List (K × NodeId)}
+    (hga : h.get a = some (.branch lc0 les)) (hgb : h.get b = some (.branch rc0 res))
+    (hother : ∀ j, j ≠ a → j ≠ b → j ≠ id → h'.get j = h.get j) :
+    ∃ LA LB', La = a :: LA ∧ Lb = b :: LB' ∧
+      reachIds.reachChildren d h (lc0 :: les.map (·.2)) = some LA ∧
+      reachIds.reachChildren d h (rc0 :: res.map (·.2)) = some LB' ∧
+      leafIds.leafChildren d h (lc0 :: les.map (·.2)) = some lva ∧
+      leafIds.leafChildren d h (rc0 :: res.map (·.2)) = some lvb ∧
+      (∀ c ∈ lc0 :: les.map (·.2), ∃ t, absNode d h c = some t) ∧
+      (∀ c ∈ rc0 :: res.map (·.2), ∃ t, absNode d h c = some t) ∧
+      (∀ i ∈ LA ++ LB', h'.get i = h.get i) ∧
+      (∀ i ∈ lvF ++ (lva ++ (lvb ++ lvB)), h'.get i = h.get i) := by
+  obtain ⟨hab, hai, hbi⟩ := W.distinct
+  have hLa := W.hLa; have hLb := W.hLb; have hlva := W.hlva; have hlvb := W.hlvb
+  rw [reachIds_branch hga] at hLa; rw [reachIds_branch hgb] at hLb
+  rw [leafIds_branch hga] at hlva; rw [leafIds_branch hgb] at hlvb
+  rcases hA : reachIds.reachChildren d h (lc0 :: les.map (·.2)) with _ | LA
+  · rw [hA] at hLa; cases hLa
+  rcases hB : reachIds.reachChildren d h (rc0 :: res.map (·.2)) with _ | LB'
+  · rw [hB] at hLb; cases hLb
+  rw [hA] at hLa; rw [hB] at hLb
+  simp only [Option.map_some, Option.some.injEq] at hLa hLb
+  subst hLa; subst hLb
+  obtain ⟨hidnb, hndbelow⟩ := List.nodup_cons.mp W.hnd
+  have hW := nodup_mid_disjoint (l1 := LF) (m := (a :: LA) ++ (b :: LB')) (l2 := LB)
+    (by simpa using hndbelow)
+  have hndmid : ((a :: LA) ++ (b :: LB')).Nodup := by
+    rw [nodup_append_iff, nodup_append_iff, nodup_append_iff] at hndbelow
+    rw [nodup_append_iff]
+    exact ⟨hndbelow.2.1.1, hndbelow.2.1.2.1.1, fun x hx y hy hxy =>
+      hndbelow.2.1.2.2 x hx y (List.mem_append_left _ hy) hxy⟩
+  obtain ⟨ta, hta⟩ := W.hall a (by rw [W.hcs]; simp)
+  obtain ⟨tb, htb⟩ := W.hall b (by rw [W.hcs]; simp)
+  refine ⟨LA, LB', rfl, rfl, hA, hB, hlva, hlvb, abs_branch_children hga hta,
+    abs_branch_children hgb htb, ?_, ?_⟩
+  · intro i hi
+    have hi' : i ∈ (a :: LA) ++ (b :: LB') := by
+      rcases List.mem_append.mp hi with hi | hi
+      · exact List.mem_append_left _ (List.mem_cons_of_mem _ hi)
+      · exact List.mem_append_right _ (List.mem_cons_of_mem _ hi)
+    have hia : i ≠ a := by
+      intro heq; subst heq
+      rcases List.mem_append.mp hi with hi | hi
+      · exact (List.nodup_cons.mp (nodup_append_iff _ _ |>.mp hndmid).1).1 hi
+      · exact (nodup_append_iff _ _ |>.mp hndmid).2.2 i List.mem_cons_self i
+          (List.mem_cons_of_mem _ hi) rfl
+    have hib : i ≠ b := by
+      intro heq; subst heq
+      rcases List.mem_append.mp hi with hi | hi
+      · exact (nodup_append_iff _ _ |>.mp hndmid).2.2 i (List.mem_cons_of_mem _ hi) i
+          List.mem_cons_self rfl
+      · exact (List.nodup_cons.mp (nodup_append_iff _ _ |>.mp hndmid).2.1).1 hi
+    have hmem : i ∈ LF ++ ((a :: LA) ++ ((b :: LB') ++ LB)) := by
+      refine List.mem_append_right LF ?_
+      rcases List.mem_append.mp hi' with h1 | h1
+      · exact List.mem_append_left _ h1
+      · exact List.mem_append_right _ (List.mem_append_left _ h1)
+    have hii : i ≠ id := fun heq => by subst heq; exact hidnb hmem
+    exact hother i hia hib hii
+  · intro i hi
+    obtain ⟨kvs, p, n, hgi⟩ := linked_mem_leaf W.hl hi
+    have hia : i ≠ a := fun heq => by subst heq; rw [hga] at hgi; cases hgi
+    have hib : i ≠ b := fun heq => by subst heq; rw [hgb] at hgi; cases hgi
+    have hii : i ≠ id := fun heq => by subst heq; rw [W.hg] at hgi; cases hgi
+    exact hother i hia hib hii
+
+/-- Splitting a children walk at a known point. -/
+theorem reachChildren_split {d : Nat} {h : Heap K V} {l1 l2 L : List NodeId}
+    (hL : reachIds.reachChildren d h (l1 ++ l2) = some L) :
+    ∃ L1 L2, reachIds.reachChildren d h l1 = some L1 ∧ reachIds.reachChildren d h l2 = some L2 ∧
+      L = L1 ++ L2 := by
+  rw [reachChildren_append] at hL
+  rcases h1 : reachIds.reachChildren d h l1 with _ | L1
+  · rw [h1] at hL; cases hL
+  rcases h2 : reachIds.reachChildren d h l2 with _ | L2
+  · rw [h1, h2] at hL; cases hL
+  rw [h1, h2] at hL
+  simp only [Option.bind_some, Option.some.injEq] at hL
+  exact ⟨L1, L2, rfl, rfl, hL.symm⟩
+
+theorem leafChildren_split {d : Nat} {h : Heap K V} {l1 l2 L : List NodeId}
+    (hL : leafIds.leafChildren d h (l1 ++ l2) = some L) :
+    ∃ L1 L2, leafIds.leafChildren d h l1 = some L1 ∧ leafIds.leafChildren d h l2 = some L2 ∧
+      L = L1 ++ L2 := by
+  rw [leafChildren_append] at hL
+  rcases h1 : leafIds.leafChildren d h l1 with _ | L1
+  · rw [h1] at hL; cases hL
+  rcases h2 : leafIds.leafChildren d h l2 with _ | L2
+  · rw [h1, h2] at hL; cases hL
+  rw [h1, h2] at hL
+  simp only [Option.bind_some, Option.some.injEq] at hL
+  exact ⟨L1, L2, rfl, rfl, hL.symm⟩
+
+theorem reachChildren_singleton {d : Nat} {h : Heap K V} {c : NodeId} {L : List NodeId}
+    (hL : reachIds.reachChildren d h [c] = some L) : reachIds d h c = some L := by
+  rw [reachChildren_cons] at hL
+  rcases hc : reachIds d h c with _ | Lc
+  · rw [hc] at hL; cases hL
+  rw [hc] at hL
+  simp only [reachIds.reachChildren, Option.bind_some, List.append_nil, Option.some.injEq] at hL
+  rw [hL]
+
+theorem leafChildren_singleton {d : Nat} {h : Heap K V} {c : NodeId} {L : List NodeId}
+    (hL : leafIds.leafChildren d h [c] = some L) : leafIds d h c = some L := by
+  rw [leafChildren_cons] at hL
+  rcases hc : leafIds d h c with _ | Lc
+  · rw [hc] at hL; cases hL
+  rw [hc] at hL
+  simp only [leafIds.leafChildren, Option.bind_some, List.append_nil, Option.some.injEq] at hL
+  rw [hL]
+
+theorem reachChildren_join {d : Nat} {h : Heap K V} {l1 l2 L1 L2 : List NodeId}
+    (h1 : reachIds.reachChildren d h l1 = some L1) (h2 : reachIds.reachChildren d h l2 = some L2) :
+    reachIds.reachChildren d h (l1 ++ l2) = some (L1 ++ L2) := by
+  rw [reachChildren_append, h1, h2]; rfl
+
+theorem leafChildren_join {d : Nat} {h : Heap K V} {l1 l2 L1 L2 : List NodeId}
+    (h1 : leafIds.leafChildren d h l1 = some L1) (h2 : leafIds.leafChildren d h l2 = some L2) :
+    leafIds.leafChildren d h (l1 ++ l2) = some (L1 ++ L2) := by
+  rw [leafChildren_append, h1, h2]; rfl
+
+theorem rotateBranchRightH_sim {d : Nat} {h : Heap K V} {id c0 : NodeId} {es : List (K × NodeId)}
+    {csF csB : List NodeId} {a b : NodeId} {LF La Lb LB lvF lva lvb lvB : List NodeId}
+    {prev0 next0 : Option NodeId}
+    (W : WinCtx d h id c0 es csF csB a b LF La Lb LB lvF lva lvb lvB prev0 next0)
+    {lc0 rc0 : NodeId} {les res : List (K × NodeId)}
+    (hga : h.get a = some (.branch lc0 les)) (hgb : h.get b = some (.branch rc0 res))
+    (hles : les ≠ []) :
+    RepairSim d h id (LF ++ (La ++ (Lb ++ LB))) (lvF ++ (lva ++ (lvb ++ lvB))) prev0 next0
+      (rotateBranchRightH h id csF.length)
+      (rotateBranchRight (es.map Prod.fst) ((csF ++ a :: b :: csB).map (absF (d + 1) h))
+        csF.length) := by
+  obtain ⟨hab, hai, hbi⟩ := W.distinct
+  have ha := W.ha; have hb' := W.hb'; have hj := W.idx_lt
+  obtain ⟨sep, hsep⟩ : ∃ sep, (es.map Prod.fst)[csF.length]? = some sep := by
+    rw [List.getElem?_eq_getElem (by simpa using hj)]; exact ⟨_, rfl⟩
+  obtain ⟨L0, pm, rfl⟩ : ∃ L0 pm, les = L0 ++ [pm] := by
+    obtain ⟨pm, hpm⟩ := Option.ne_none_iff_exists'.mp
+      (fun heq => hles (List.getLast?_eq_none_iff.mp heq))
+    obtain ⟨L0, hL0⟩ := List.getLast?_eq_some_iff.mp hpm
+    exact ⟨L0, pm, hL0⟩
+  obtain ⟨promoted, m⟩ := pm
+  have hlast : (L0 ++ [(promoted, m)]).getLast? = some (promoted, m) := by simp
+  obtain ⟨h', hrun, hga', hgb', hgid', hother, hfr⟩ :=
+    rotateBranchRightH_spec W.hg ha hb' hsep hga hgb hab hai hbi hlast
+  rw [List.dropLast_concat] at hga'
+  obtain ⟨LA, LB', rfl, rfl, hA, hB, hlvA, hlvB', hallA, hallB, hgc, hleaves⟩ :=
+    branch_window_facts W hga hgb hother
+  obtain ⟨hg, hcs, hLF, hLa, hLb, hLB, hlvF, hlva, hlvb, hlvB, hall, hnd, hb, hl, hnext⟩ := W
+  obtain ⟨hsame, hframe, habsF, habsB, hbd⟩ := window_frame_facts (nb := none) hLF hLa hLb
+    hLB hnd hb (by simp [hg]) hnext (fun j hja hjb hji _ => hother j hja hjb hji)
+    (fun o ho => by cases ho) (fun o ho => by cases ho) hfr
+  have hsucc := window_succ (nb := none) hLa hLb hnext (fun j hja hjb hji _ => hother j hja hjb hji)
+    (fun o _ ho => by cases ho)
+  refine ⟨h', hrun, hfr, hbd, ?_⟩
+  -- the grandchildren, split at the moved child
+  have hsplitA : lc0 :: (L0 ++ [(promoted, m)]).map (·.2) = (lc0 :: L0.map (·.2)) ++ [m] := by simp
+  rw [hsplitA] at hA hlvA hallA
+  obtain ⟨LA0, Lm, hA0, hAm, rfl⟩ := reachChildren_split hA
+  obtain ⟨lvA0, lvm, hlvA0, hlvAm, rfl⟩ := leafChildren_split hlvA
+  have hAm' := reachChildren_singleton hAm
+  have hlvAm' := leafChildren_singleton hlvAm
+  have hgc' : ∀ i ∈ (LA0 ++ Lm) ++ LB', SameContent (h.get i) (h'.get i) :=
+    fun i hi => sameContent_of_eq (hgc i hi)
+  obtain ⟨hA0', habsA0, hlvA0'⟩ := children_congr d (lc0 :: L0.map (·.2)) LA0 hA0
+    (fun i hi => hgc' i (List.mem_append_left _ (List.mem_append_left _ hi)))
+  obtain ⟨hAm'', habsm, hlvm'⟩ := walks_congr d h h' m Lm hAm'
+    (fun i hi => hgc' i (List.mem_append_left _ (List.mem_append_right _ hi)))
+  obtain ⟨hB', habsB', hlvB''⟩ := children_congr d (rc0 :: res.map (·.2)) LB' hB
+    (fun i hi => hgc' i (List.mem_append_right _ hi))
+  rw [hlvA0] at hlvA0'; rw [hlvAm'] at hlvm'; rw [hlvB'] at hlvB''
+  -- the new children lists walk under `h'`
+  have hcsA' : lc0 :: L0.map (·.2) = lc0 :: L0.map (·.2) := rfl
+  have hcsB' : m :: ((sep, rc0) :: res).map (·.2) = [m] ++ (rc0 :: res.map (·.2)) := by simp
+  have hreachA' : reachIds.reachChildren d h' (lc0 :: L0.map (·.2)) = some LA0 := hA0'
+  have hreachB' : reachIds.reachChildren d h' (m :: ((sep, rc0) :: res).map (·.2)) =
+      some (Lm ++ LB') := by
+    rw [hcsB']; exact reachChildren_join (by simp [reachChildren_cons, reachIds.reachChildren, hAm'']) hB'
+  have hlvA' : leafIds.leafChildren d h' (lc0 :: L0.map (·.2)) = some lvA0 := hlvA0'
+  have hlvBn : leafIds.leafChildren d h' (m :: ((sep, rc0) :: res).map (·.2)) =
+      some (lvm ++ lvb) := by
+    rw [hcsB']; exact leafChildren_join (by simp [leafChildren_cons, leafIds.leafChildren, hlvm']) hlvB''
+  have hallA' : ∀ c ∈ lc0 :: L0.map (·.2), ∃ t, absNode d h' c = some t := fun c hc => by
+    rw [habsA0 c hc]; exact hallA c (List.mem_append_left _ hc)
+  have hallB' : ∀ c ∈ m :: ((sep, rc0) :: res).map (·.2), ∃ t, absNode d h' c = some t := by
+    intro c hc
+    rw [hcsB'] at hc
+    rcases List.mem_append.mp hc with hc | hc
+    · rw [List.mem_singleton.mp hc, habsm]; exact hallA m (by simp)
+    · rw [habsB' c hc]; exact hallB c hc
+  have hsubA := sub_branch_mk hga' hreachA' hlvA' hallA'
+  have hsubB := sub_branch_mk hgb' hreachB' hlvBn hallB'
+  -- the tree side
+  have hcs' : c0 :: es.map Prod.snd = csF ++ a :: b :: csB := hcs
+  have harr : rotateBranchRight (es.map Prod.fst) ((csF ++ a :: b :: csB).map (absF (d + 1) h))
+      csF.length =
+      ((setSep es csF.length promoted).map Prod.fst,
+        (csF ++ a :: b :: csB).map (absF (d + 1) h')) := by
+    have hlesLast : ((L0 ++ [(promoted, m)]).map fun e => (e.1, absF d h e.2)).getLast? =
+        some (promoted, absF d h m) := by simp
+    have hlesDrop : ((L0 ++ [(promoted, m)]).map fun e => (e.1, absF d h e.2)).dropLast =
+        L0.map fun e => (e.1, absF d h e.2) := by simp
+    simp only [rotateBranchRight, List.getElem?_map, getElem?_window_fst, getElem?_window_snd,
+      Option.map_some, hsep, absF_of_some (absNode_branch_map hga (by rw [hsplitA]; exact hallA)),
+      absF_of_some (absNode_branch_map hgb hallB), hlesLast, hlesDrop]
+    rw [map_fst_setSep _ _ _ hj, map_window (absF (d + 1) h) (absF (d + 1) h') csF csB a b
+      (fun c hc => by simp [absF, habsF c hc]) (fun c hc => by simp [absF, habsB c hc]),
+      absF_of_some (absNode_branch_map hga' hallA'), absF_of_some (absNode_branch_map hgb' hallB')]
+    have hmapL0 : (L0.map fun e => (e.1, absF d h' e.2)) = L0.map fun e => (e.1, absF d h e.2) :=
+      map_entries_congr (fun c hc => habsA0 c (List.mem_cons_of_mem _ hc))
+    have hmapRes : (res.map fun e => (e.1, absF d h' e.2)) = res.map fun e => (e.1, absF d h e.2) :=
+      map_entries_congr (fun c hc => habsB' c (List.mem_cons_of_mem _ hc))
+    have h1 : absF d h' lc0 = absF d h lc0 := by simp [absF, habsA0 lc0 List.mem_cons_self]
+    have h2 : absF d h' m = absF d h m := by simp [absF, habsm]
+    have h3 : absF d h' rc0 = absF d h rc0 := by simp [absF, habsB' rc0 List.mem_cons_self]
+    simp only [List.map_cons, hmapL0, hmapRes, h1, h2, h3]
+  rw [harr]
+  have hmid : c0 :: (setSep es csF.length promoted).map (·.2) = csF ++ [a, b] ++ csB := by
+    rw [show (fun x : K × NodeId => x.2) = Prod.snd from rfl, map_snd_setSep, hcs']; simp
+  have hl' : Linked h' prev0 (lvF ++ ((lvA0 ++ (lvm ++ lvb)) ++ lvB)) next0 := by
+    have := linked_congr hleaves hl
+    simpa [List.append_assoc] using this
+  have hperm : ((a :: LA0) ++ (b :: (Lm ++ LB'))).Perm ((a :: (LA0 ++ Lm)) ++ (b :: LB')) := by
+    simp only [List.cons_append, List.append_assoc]
+    exact List.Perm.cons a (List.Perm.append_left LA0 List.perm_middle.symm)
+  have hndab : ((a :: (LA0 ++ Lm)) ++ (b :: LB')).Nodup := by
+    refine List.Nodup.sublist ?_ hnd
+    refine List.Sublist.trans ?_ (List.sublist_cons_self id _)
+    refine List.Sublist.trans ?_ (List.sublist_append_right LF _)
+    rw [← List.append_assoc]; exact List.sublist_append_left _ _
+  have hlvA0ne : lvA0 ≠ [] :=
+    ((leaf_facts d).2 h (lc0 :: L0.map (·.2)) LA0 lvA0 hA0 hlvA0).1 (by simp)
+  have := window_reassemble (mid := [a, b]) (Lmid := (a :: LA0) ++ (b :: (Lm ++ LB')))
+    (lvmid := lvA0 ++ (lvm ++ lvb)) (lvb := lvb) hcs hLF hLa hLb hLB hlvF hlva hlvB hall hnd hgid' hmid
+    (by
+      rw [reachChildren_cons, reachIds_branch hga', hreachA', reachChildren_cons,
+        reachIds_branch hgb', hreachB']
+      simp [reachIds.reachChildren])
+    (by
+      rw [leafChildren_cons, leafIds_branch hga', hlvA', leafChildren_cons, leafIds_branch hgb',
+        hlvBn]
+      simp [leafIds.leafChildren])
+    (fun c hc => by
+      simp only [List.mem_cons, List.mem_singleton, List.not_mem_nil, or_false] at hc
+      rcases hc with hc | hc <;> rw [hc]
+      · exact ⟨_, hsubA.abs⟩
+      · exact ⟨_, hsubB.abs⟩)
+    (hperm.nodup_iff.mpr hndab) (fun i hi => hperm.mem_iff.mp hi)
+    (fun i hi hni => absurd (hperm.mem_iff.mpr hi) hni)
+    (List.append_ne_nil_of_left_ne_nil hlvA0ne _)
+    (by rw [head?_append_of_ne_nil _ hlvA0ne, head?_append_of_ne_nil _ hlvA0ne])
+    hsame hl' hframe (by simpa [List.append_assoc] using hsucc)
+  simpa using this
+
+theorem rotateBranchLeftH_sim {d : Nat} {h : Heap K V} {id c0 : NodeId} {es : List (K × NodeId)}
+    {csF csB : List NodeId} {a b : NodeId} {LF La Lb LB lvF lva lvb lvB : List NodeId}
+    {prev0 next0 : Option NodeId}
+    (W : WinCtx d h id c0 es csF csB a b LF La Lb LB lvF lva lvb lvB prev0 next0)
+    {lc0 rc0 : NodeId} {les res : List (K × NodeId)}
+    (hga : h.get a = some (.branch lc0 les)) (hgb : h.get b = some (.branch rc0 res))
+    (hres : res ≠ []) :
+    RepairSim d h id (LF ++ (La ++ (Lb ++ LB))) (lvF ++ (lva ++ (lvb ++ lvB))) prev0 next0
+      (rotateBranchLeftH h id csF.length)
+      (rotateBranchLeft (es.map Prod.fst) ((csF ++ a :: b :: csB).map (absF (d + 1) h))
+        csF.length) := by
+  obtain ⟨hab, hai, hbi⟩ := W.distinct
+  have ha := W.ha; have hb' := W.hb'; have hj := W.idx_lt
+  obtain ⟨sep, hsep⟩ : ∃ sep, (es.map Prod.fst)[csF.length]? = some sep := by
+    rw [List.getElem?_eq_getElem (by simpa using hj)]; exact ⟨_, rfl⟩
+  obtain ⟨⟨promoted, rch1⟩, rest, rfl⟩ : ∃ pr rest, res = pr :: rest := by
+    cases res with
+    | nil => exact absurd rfl hres
+    | cons pr rest => exact ⟨pr, rest, rfl⟩
+  obtain ⟨h', hrun, hga', hgb', hgid', hother, hfr⟩ :=
+    rotateBranchLeftH_spec W.hg ha hb' hsep hga hgb hab hai hbi
+  obtain ⟨LA, LB', rfl, rfl, hA, hB, hlvA, hlvB', hallA, hallB, hgc, hleaves⟩ :=
+    branch_window_facts W hga hgb hother
+  obtain ⟨hg, hcs, hLF, hLa, hLb, hLB, hlvF, hlva, hlvb, hlvB, hall, hnd, hb, hl, hnext⟩ := W
+  obtain ⟨hsame, hframe, habsF, habsB, hbd⟩ := window_frame_facts (nb := none) hLF hLa hLb
+    hLB hnd hb (by simp [hg]) hnext (fun j hja hjb hji _ => hother j hja hjb hji)
+    (fun o ho => by cases ho) (fun o ho => by cases ho) hfr
+  have hsucc := window_succ (nb := none) hLa hLb hnext (fun j hja hjb hji _ => hother j hja hjb hji)
+    (fun o _ ho => by cases ho)
+  refine ⟨h', hrun, hfr, hbd, ?_⟩
+  -- the grandchildren of `b`, split after its first
+  have hsplitB : rc0 :: ((promoted, rch1) :: rest).map (·.2) = [rc0] ++ (rch1 :: rest.map (·.2)) := by
+    simp
+  rw [hsplitB] at hB hlvB' hallB
+  obtain ⟨Lr, LB1, hBr, hB1, rfl⟩ := reachChildren_split hB
+  obtain ⟨lvr, lvB1, hlvBr, hlvB1, rfl⟩ := leafChildren_split hlvB'
+  have hBr' := reachChildren_singleton hBr
+  have hlvBr' := leafChildren_singleton hlvBr
+  have hgc' : ∀ i ∈ LA ++ (Lr ++ LB1), SameContent (h.get i) (h'.get i) :=
+    fun i hi => sameContent_of_eq (hgc i hi)
+  obtain ⟨hA', habsA, hlvA'⟩ := children_congr d (lc0 :: les.map (·.2)) LA hA
+    (fun i hi => hgc' i (List.mem_append_left _ hi))
+  obtain ⟨hBr'', habsr, hlvr'⟩ := walks_congr d h h' rc0 Lr hBr'
+    (fun i hi => hgc' i (List.mem_append_right _ (List.mem_append_left _ hi)))
+  obtain ⟨hB1', habsB1, hlvB1'⟩ := children_congr d (rch1 :: rest.map (·.2)) LB1 hB1
+    (fun i hi => hgc' i (List.mem_append_right _ (List.mem_append_right _ hi)))
+  rw [hlvA] at hlvA'; rw [hlvBr'] at hlvr'; rw [hlvB1] at hlvB1'
+  -- the new children lists walk under `h'`
+  have hcsA' : lc0 :: (les ++ [(sep, rc0)]).map (·.2) = (lc0 :: les.map (·.2)) ++ [rc0] := by simp
+  have hreachA' : reachIds.reachChildren d h' (lc0 :: (les ++ [(sep, rc0)]).map (·.2)) =
+      some (LA ++ Lr) := by
+    rw [hcsA']
+    exact reachChildren_join hA' (by simp [reachChildren_cons, reachIds.reachChildren, hBr''])
+  have hlvAn : leafIds.leafChildren d h' (lc0 :: (les ++ [(sep, rc0)]).map (·.2)) =
+      some (lva ++ lvr) := by
+    rw [hcsA']
+    exact leafChildren_join hlvA' (by simp [leafChildren_cons, leafIds.leafChildren, hlvr'])
+  have hreachB' : reachIds.reachChildren d h' (rch1 :: rest.map (·.2)) = some LB1 := hB1'
+  have hlvBn : leafIds.leafChildren d h' (rch1 :: rest.map (·.2)) = some lvB1 := hlvB1'
+  have hallA' : ∀ c ∈ lc0 :: (les ++ [(sep, rc0)]).map (·.2), ∃ t, absNode d h' c = some t := by
+    intro c hc
+    rw [hcsA'] at hc
+    rcases List.mem_append.mp hc with hc | hc
+    · rw [habsA c hc]; exact hallA c hc
+    · rw [List.mem_singleton.mp hc, habsr]; exact hallB rc0 (by simp)
+  have hallB' : ∀ c ∈ rch1 :: rest.map (·.2), ∃ t, absNode d h' c = some t := fun c hc => by
+    rw [habsB1 c hc]; exact hallB c (List.mem_append_right _ hc)
+  have hsubA := sub_branch_mk hga' hreachA' hlvAn hallA'
+  have hsubB := sub_branch_mk hgb' hreachB' hlvBn hallB'
+  -- the tree side
+  have hcs' : c0 :: es.map Prod.snd = csF ++ a :: b :: csB := hcs
+  have harr : rotateBranchLeft (es.map Prod.fst) ((csF ++ a :: b :: csB).map (absF (d + 1) h))
+      csF.length =
+      ((setSep es csF.length promoted).map Prod.fst,
+        (csF ++ a :: b :: csB).map (absF (d + 1) h')) := by
+    have hresMap : (((promoted, rch1) :: rest).map fun e => (e.1, absF d h e.2)) =
+        (promoted, absF d h rch1) :: rest.map fun e => (e.1, absF d h e.2) := rfl
+    simp only [rotateBranchLeft, List.getElem?_map, getElem?_window_fst, getElem?_window_snd,
+      Option.map_some, hsep, absF_of_some (absNode_branch_map hga hallA),
+      absF_of_some (absNode_branch_map hgb (by rw [hsplitB]; exact hallB)), hresMap]
+    rw [map_fst_setSep _ _ _ hj, map_window (absF (d + 1) h) (absF (d + 1) h') csF csB a b
+      (fun c hc => by simp [absF, habsF c hc]) (fun c hc => by simp [absF, habsB c hc]),
+      absF_of_some (absNode_branch_map hga' hallA'), absF_of_some (absNode_branch_map hgb' hallB')]
+    have hmapLes : (les.map fun e => (e.1, absF d h' e.2)) = les.map fun e => (e.1, absF d h e.2) :=
+      map_entries_congr (fun c hc => habsA c (List.mem_cons_of_mem _ hc))
+    have hmapRest : (rest.map fun e => (e.1, absF d h' e.2)) =
+        rest.map fun e => (e.1, absF d h e.2) :=
+      map_entries_congr (fun c hc => habsB1 c (List.mem_cons_of_mem _ hc))
+    have h1 : absF d h' lc0 = absF d h lc0 := by simp [absF, habsA lc0 List.mem_cons_self]
+    have h2 : absF d h' rc0 = absF d h rc0 := by simp [absF, habsr]
+    have h3 : absF d h' rch1 = absF d h rch1 := by simp [absF, habsB1 rch1 List.mem_cons_self]
+    simp only [List.map_append, List.map_cons, List.map_nil, hmapLes, hmapRest, h1, h2, h3]
+  rw [harr]
+  have hmid : c0 :: (setSep es csF.length promoted).map (·.2) = csF ++ [a, b] ++ csB := by
+    rw [show (fun x : K × NodeId => x.2) = Prod.snd from rfl, map_snd_setSep, hcs']; simp
+  have hl' : Linked h' prev0 (lvF ++ (((lva ++ lvr) ++ lvB1) ++ lvB)) next0 := by
+    have := linked_congr hleaves hl
+    simpa [List.append_assoc] using this
+  have hperm : ((a :: (LA ++ Lr)) ++ (b :: LB1)).Perm ((a :: LA) ++ (b :: (Lr ++ LB1))) := by
+    simp only [List.cons_append, List.append_assoc]
+    exact List.Perm.cons a (List.Perm.append_left LA List.perm_middle)
+  have hndab : ((a :: LA) ++ (b :: (Lr ++ LB1))).Nodup := by
+    refine List.Nodup.sublist ?_ hnd
+    refine List.Sublist.trans ?_ (List.sublist_cons_self id _)
+    refine List.Sublist.trans ?_ (List.sublist_append_right LF _)
+    rw [← List.append_assoc]; exact List.sublist_append_left _ _
+  have hlvane : lva ≠ [] :=
+    ((leaf_facts d).2 h (lc0 :: les.map (·.2)) LA lva hA hlvA).1 (by simp)
+  have := window_reassemble (mid := [a, b]) (Lmid := (a :: (LA ++ Lr)) ++ (b :: LB1))
+    (lvmid := (lva ++ lvr) ++ lvB1) (lvb := lvr ++ lvB1) hcs hLF hLa hLb hLB hlvF hlva hlvB hall hnd
+    hgid' hmid
+    (by
+      rw [reachChildren_cons, reachIds_branch hga', hreachA', reachChildren_cons,
+        reachIds_branch hgb', hreachB']
+      simp [reachIds.reachChildren])
+    (by
+      rw [leafChildren_cons, leafIds_branch hga', hlvAn, leafChildren_cons, leafIds_branch hgb',
+        hlvBn]
+      simp [leafIds.leafChildren])
+    (fun c hc => by
+      simp only [List.mem_cons, List.mem_singleton, List.not_mem_nil, or_false] at hc
+      rcases hc with hc | hc <;> rw [hc]
+      · exact ⟨_, hsubA.abs⟩
+      · exact ⟨_, hsubB.abs⟩)
+    (hperm.nodup_iff.mpr hndab) (fun i hi => hperm.mem_iff.mp hi)
+    (fun i hi hni => absurd (hperm.mem_iff.mpr hi) hni)
+    (List.append_ne_nil_of_left_ne_nil (List.append_ne_nil_of_left_ne_nil hlvane _) _)
+    (by rw [head?_append_of_ne_nil _ (List.append_ne_nil_of_left_ne_nil hlvane _),
+      head?_append_of_ne_nil _ hlvane])
+    hsame hl' hframe (by simpa [List.append_assoc] using hsucc)
+  simpa using this
+
+theorem mergeBranchPairH_sim {d : Nat} {h : Heap K V} {id c0 : NodeId} {es : List (K × NodeId)}
+    {csF csB : List NodeId} {a b : NodeId} {LF La Lb LB lvF lva lvb lvB : List NodeId}
+    {prev0 next0 : Option NodeId}
+    (W : WinCtx d h id c0 es csF csB a b LF La Lb LB lvF lva lvb lvB prev0 next0)
+    {lc0 rc0 : NodeId} {les res : List (K × NodeId)}
+    (hga : h.get a = some (.branch lc0 les)) (hgb : h.get b = some (.branch rc0 res)) :
+    RepairSim d h id (LF ++ (La ++ (Lb ++ LB))) (lvF ++ (lva ++ (lvb ++ lvB))) prev0 next0
+      (mergeBranchPairH h id csF.length)
+      (mergeBranchPair (es.map Prod.fst) ((csF ++ a :: b :: csB).map (absF (d + 1) h))
+        csF.length) := by
+  obtain ⟨hab, hai, hbi⟩ := W.distinct
+  have ha := W.ha; have hb' := W.hb'; have hj := W.idx_lt
+  obtain ⟨sep, hsep⟩ : ∃ sep, (es.map Prod.fst)[csF.length]? = some sep := by
+    rw [List.getElem?_eq_getElem (by simpa using hj)]; exact ⟨_, rfl⟩
+  obtain ⟨h', hrun, hga', hgb', hgid', hother, hfr⟩ :=
+    mergeBranchPairH_spec W.hg ha hb' hsep hga hgb hab hai hbi
+  obtain ⟨LA, LB', rfl, rfl, hA, hB, hlvA, hlvB', hallA, hallB, hgc, hleaves⟩ :=
+    branch_window_facts W hga hgb hother
+  obtain ⟨hg, hcs, hLF, hLa, hLb, hLB, hlvF, hlva, hlvb, hlvB, hall, hnd, hb, hl, hnext⟩ := W
+  obtain ⟨hsame, hframe, habsF, habsB, hbd⟩ := window_frame_facts (nb := none) hLF hLa hLb
+    hLB hnd hb (by simp [hg]) hnext (fun j hja hjb hji _ => hother j hja hjb hji)
+    (fun o ho => by cases ho) (fun o ho => by cases ho) hfr
+  have hsucc := window_succ (nb := none) hLa hLb hnext (fun j hja hjb hji _ => hother j hja hjb hji)
+    (fun o _ ho => by cases ho)
+  refine ⟨h', hrun, hfr, hbd, ?_⟩
+  have hgc' : ∀ i ∈ LA ++ LB', SameContent (h.get i) (h'.get i) :=
+    fun i hi => sameContent_of_eq (hgc i hi)
+  obtain ⟨hA', habsA, hlvA'⟩ := children_congr d (lc0 :: les.map (·.2)) LA hA
+    (fun i hi => hgc' i (List.mem_append_left _ hi))
+  obtain ⟨hB', habsB', hlvB''⟩ := children_congr d (rc0 :: res.map (·.2)) LB' hB
+    (fun i hi => hgc' i (List.mem_append_right _ hi))
+  rw [hlvA] at hlvA'; rw [hlvB'] at hlvB''
+  have hcsA' : lc0 :: (les ++ (sep, rc0) :: res).map (·.2) =
+      (lc0 :: les.map (·.2)) ++ (rc0 :: res.map (·.2)) := by simp
+  have hreachA' : reachIds.reachChildren d h' (lc0 :: (les ++ (sep, rc0) :: res).map (·.2)) =
+      some (LA ++ LB') := by
+    rw [hcsA']; exact reachChildren_join hA' hB'
+  have hlvAn : leafIds.leafChildren d h' (lc0 :: (les ++ (sep, rc0) :: res).map (·.2)) =
+      some (lva ++ lvb) := by
+    rw [hcsA']; exact leafChildren_join hlvA' hlvB''
+  have hallA' : ∀ c ∈ lc0 :: (les ++ (sep, rc0) :: res).map (·.2), ∃ t, absNode d h' c = some t := by
+    intro c hc
+    rw [hcsA'] at hc
+    rcases List.mem_append.mp hc with hc | hc
+    · rw [habsA c hc]; exact hallA c hc
+    · rw [habsB' c hc]; exact hallB c hc
+  have hsubA := sub_branch_mk hga' hreachA' hlvAn hallA'
+  have hcs' : c0 :: es.map Prod.snd = csF ++ a :: b :: csB := hcs
+  have harr : mergeBranchPair (es.map Prod.fst) ((csF ++ a :: b :: csB).map (absF (d + 1) h))
+      csF.length =
+      ((es.eraseIdx csF.length).map Prod.fst, (csF ++ a :: csB).map (absF (d + 1) h')) := by
+    simp only [mergeBranchPair, List.getElem?_map, getElem?_window_fst, getElem?_window_snd,
+      Option.map_some, hsep, absF_of_some (absNode_branch_map hga hallA),
+      absF_of_some (absNode_branch_map hgb hallB)]
+    rw [map_eraseIdx, map_window_erase (absF (d + 1) h) (absF (d + 1) h') csF csB a b
+      (fun c hc => by simp [absF, habsF c hc]) (fun c hc => by simp [absF, habsB c hc]),
+      absF_of_some (absNode_branch_map hga' hallA')]
+    have hmapLes : (les.map fun e => (e.1, absF d h' e.2)) = les.map fun e => (e.1, absF d h e.2) :=
+      map_entries_congr (fun c hc => habsA c (List.mem_cons_of_mem _ hc))
+    have hmapRes : (res.map fun e => (e.1, absF d h' e.2)) = res.map fun e => (e.1, absF d h e.2) :=
+      map_entries_congr (fun c hc => habsB' c (List.mem_cons_of_mem _ hc))
+    have h1 : absF d h' lc0 = absF d h lc0 := by simp [absF, habsA lc0 List.mem_cons_self]
+    have h2 : absF d h' rc0 = absF d h rc0 := by simp [absF, habsB' rc0 List.mem_cons_self]
+    simp only [List.map_append, List.map_cons, hmapLes, hmapRes, h1, h2]
+  rw [harr]
+  have hmid : c0 :: (es.eraseIdx csF.length).map (·.2) = csF ++ [a] ++ csB := by
+    rw [show (fun x : K × NodeId => x.2) = Prod.snd from rfl, cons_map_snd_eraseIdx, hcs',
+      eraseIdx_window2]
+    simp
+  have hl' : Linked h' prev0 (lvF ++ ((lva ++ lvb) ++ lvB)) next0 := by
+    have := linked_congr hleaves hl
+    simpa [List.append_assoc] using this
+  have hsub : (a :: (LA ++ LB')).Sublist ((a :: LA) ++ (b :: LB')) := by
+    simp only [List.cons_append]
+    exact List.Sublist.cons₂ a ((List.Sublist.refl LA).append (List.sublist_cons_self b LB'))
+  have hndab : ((a :: LA) ++ (b :: LB')).Nodup := by
+    refine List.Nodup.sublist ?_ hnd
+    refine List.Sublist.trans ?_ (List.sublist_cons_self id _)
+    refine List.Sublist.trans ?_ (List.sublist_append_right LF _)
+    rw [← List.append_assoc]; exact List.sublist_append_left _ _
+  have hlvane : lva ≠ [] :=
+    ((leaf_facts d).2 h (lc0 :: les.map (·.2)) LA lva hA hlvA).1 (by simp)
+  have := window_reassemble (mid := [a]) (Lmid := a :: (LA ++ LB')) (lvmid := lva ++ lvb)
+    (lvb := lvb) hcs hLF hLa hLb hLB hlvF hlva hlvB hall hnd hgid' hmid
+    (by
+      rw [reachChildren_cons, reachIds_branch hga', hreachA']
+      simp [reachIds.reachChildren])
+    (by
+      rw [leafChildren_cons, leafIds_branch hga', hlvAn]
+      simp [leafIds.leafChildren])
+    (fun c hc => by rw [List.mem_singleton.mp hc]; exact ⟨_, hsubA.abs⟩)
+    (hndab.sublist hsub) (fun i hi => hsub.subset hi)
+    (fun i hi hni => by
+      simp only [List.cons_append, List.mem_cons, List.mem_append] at hi hni
+      have : i = b := by
+        rcases hi with hi | hi | hi | hi
+        · exact absurd (Or.inl hi) hni
+        · exact absurd (Or.inr (Or.inl hi)) hni
+        · exact hi
+        · exact absurd (Or.inr (Or.inr hi)) hni
+      rw [this]; exact hgb')
+    (List.append_ne_nil_of_left_ne_nil hlvane _)
+    (by rw [head?_append_of_ne_nil _ hlvane])
+    hsame hl' hframe (by simpa [List.append_assoc] using hsucc)
+  simpa using this
+
 end HeapRemove
 
 end BPlusTree
