@@ -1801,6 +1801,743 @@ theorem mergeBranchPairH_sim {d : Nat} {h : Heap K V} {id c0 : NodeId} {es : Lis
     hsame hl' hframe (by simpa [List.append_assoc] using hsucc)
   simpa using this
 
+/-! ## `fix_branch_child` -/
+
+theorem childLen_map_eq {d : Nat} {h : Heap K V} {cs : List NodeId} {j : Nat} {c : NodeId}
+    {t : Node K V} (hc : cs[j]? = some c) (ht : absNode d h c = some t) :
+    childLen (cs.map (absF d h)) j = t.len := by
+  simp [childLen, List.getElem?_map, hc, absF_of_some ht]
+
+/-- `fix_branch_child` on the heap: no fault, no allocation, the same
+underflow verdict as the tree model, and `FixPost` for the tree model's
+result. Needs the children to be of one kind (true under `WF`), the index
+in range, and at least one separator (so a sibling exists). -/
+theorem fixBranchChildH_sim (lc bc : Nat) (hlc : 2 ≤ lc) {d : Nat} {h : Heap K V} {id c0 : NodeId}
+    {es : List (K × NodeId)} {below lv : List NodeId} {prev0 next0 : Option NodeId} {i : Nat}
+    (hg : h.get id = some (.branch c0 es))
+    (hreach : reachIds.reachChildren (d + 1) h (c0 :: es.map (·.2)) = some below)
+    (hlv : leafIds.leafChildren (d + 1) h (c0 :: es.map (·.2)) = some lv)
+    (hall : ∀ c ∈ c0 :: es.map (·.2), ∃ t, absNode (d + 1) h c = some t)
+    (hkind : (∀ c ∈ c0 :: es.map (·.2), ∃ kvs p n, h.get c = some (.leaf kvs p n)) ∨
+      (∀ c ∈ c0 :: es.map (·.2), ∃ c0' es', h.get c = some (.branch c0' es')))
+    (hi : i ≤ es.length) (hlen : 1 ≤ es.length)
+    (hnd : (id :: below).Nodup) (hb : Heap.Bounded h) (hl : Linked h prev0 lv next0)
+    (hnext : NextOK h (id :: below) lv prev0 next0) :
+    ∃ under h', fixBranchChildH lc bc h id i = some (under, h') ∧ h'.fresh = h.fresh ∧
+      Heap.Bounded h' ∧
+      (fixBranchChild lc bc (.branch (absF (d + 1) h c0)
+        (es.map fun e => (e.1, absF (d + 1) h e.2))) i).2 = under ∧
+      FixPost d h h' id (fixBranchChild lc bc (.branch (absF (d + 1) h c0)
+        (es.map fun e => (e.1, absF (d + 1) h e.2))) i).1 below lv prev0 next0 := by
+  have hkeys : (es.map fun e => (e.1, absF (d + 1) h e.2)).map (·.1) = es.map Prod.fst := by simp
+  have hchs : absF (d + 1) h c0 :: (es.map fun e => (e.1, absF (d + 1) h e.2)).map (·.2) =
+      (c0 :: es.map (·.2)).map (absF (d + 1) h) := by simp
+  have hlen' : (c0 :: es.map (·.2)).length = es.length + 1 := by simp
+  have hlenk : (es.map Prod.fst).length = es.length := by simp
+  obtain ⟨child, hchild⟩ : ∃ child, childAt c0 es i = some child := by
+    rw [childAt, List.getElem?_eq_getElem (by simp; omega)]; exact ⟨_, rfl⟩
+  have hchildmem : child ∈ c0 :: es.map (·.2) := List.mem_of_getElem? hchild
+  have hchild' : ((c0 :: es.map (·.2)).map (absF (d + 1) h))[i]? = some (absF (d + 1) h child) := by
+    rw [List.getElem?_map, childAt_some hchild]; rfl
+  have hplan : ∀ min, planRebalanceH h (c0 :: es.map (·.2)) i es.length min =
+      some (planRebalance ((c0 :: es.map (·.2)).map (absF (d + 1) h)) i es.length min) :=
+    fun min => planRebalanceH_eq hall hi hlen'
+  simp only [fixBranchChild, hkeys, hchs, hchild', hlenk]
+  simp only [fixBranchChildH, Heap.getBranch_eq hg, hchild, Option.bind_eq_bind, Option.bind_some]
+  -- the window around the child, for each plan
+  have hwinL : 0 < i → ∃ (csF csB : List NodeId) (a b : NodeId)
+      (LF La Lb LB lvF lva lvb lvB : List NodeId),
+      c0 :: es.map (·.2) = csF ++ a :: b :: csB ∧ csF.length = i - 1 ∧ b = child ∧
+      WinCtx d h id c0 es csF csB a b LF La Lb LB lvF lva lvb lvB prev0 next0 ∧
+      below = LF ++ (La ++ (Lb ++ LB)) ∧ lv = lvF ++ (lva ++ (lvb ++ lvB)) := by
+    intro hpos
+    obtain ⟨csF, csB, a, b, LF, La, Lb, LB, lvF, lva, lvb, lvB, hsplit, hlenF, ha, hb', hLF, hLa,
+      hLb, hLB, hlvF, hlva, hlvb, hlvB, hbelow, hlv'⟩ :=
+      window_ctx hreach hlv (i := i - 1) (by simp; omega)
+    have hbc : b = child := by
+      have : i - 1 + 1 = i := by omega
+      rw [this] at hb'; rw [hb'] at hchild; exact Option.some.inj hchild
+    subst hbelow; subst hlv'
+    exact ⟨csF, csB, a, b, LF, La, Lb, LB, lvF, lva, lvb, lvB, hsplit, hlenF, hbc,
+      ⟨hg, hsplit, hLF, hLa, hLb, hLB, hlvF, hlva, hlvb, hlvB, hall, hnd, hb, hl, hnext⟩, rfl, rfl⟩
+  have hwinR : i < es.length → ∃ (csF csB : List NodeId) (a b : NodeId)
+      (LF La Lb LB lvF lva lvb lvB : List NodeId),
+      c0 :: es.map (·.2) = csF ++ a :: b :: csB ∧ csF.length = i ∧ a = child ∧
+      WinCtx d h id c0 es csF csB a b LF La Lb LB lvF lva lvb lvB prev0 next0 ∧
+      below = LF ++ (La ++ (Lb ++ LB)) ∧ lv = lvF ++ (lva ++ (lvb ++ lvB)) := by
+    intro hlt
+    obtain ⟨csF, csB, a, b, LF, La, Lb, LB, lvF, lva, lvb, lvB, hsplit, hlenF, ha, hb', hLF, hLa,
+      hLb, hLB, hlvF, hlva, hlvb, hlvB, hbelow, hlv'⟩ :=
+      window_ctx hreach hlv (i := i) (by simp; omega)
+    have hac : a = child := by rw [ha] at hchild; exact Option.some.inj hchild
+    subst hbelow; subst hlv'
+    exact ⟨csF, csB, a, b, LF, La, Lb, LB, lvF, lva, lvb, lvB, hsplit, hlenF, hac,
+      ⟨hg, hsplit, hLF, hLa, hLb, hLB, hlvF, hlva, hlvb, hlvB, hall, hnd, hb, hl, hnext⟩, rfl, rfl⟩
+  have hspec := planRebalance_spec ((c0 :: es.map (·.2)).map (absF (d + 1) h)) i es.length
+  rcases hkind with hleaves | hbranches
+  · -- leaf children
+    obtain ⟨kvs, p, n, hgchild⟩ := hleaves child hchildmem
+    have habschild : absF (d + 1) h child = .leaf kvs := absF_of_some (absNode_leaf hgchild d)
+    simp only [habschild, hgchild, rebalanceLeafChild, rebalanceLeafChildH, Heap.getBranch_eq hg,
+      hplan, Option.bind_eq_bind, Option.bind_some]
+    have hspec := hspec (minLeafLen lc)
+    generalize hp : planRebalance ((c0 :: es.map (·.2)).map (absF (d + 1) h)) i es.length
+      (minLeafLen lc) = plan at hspec ⊢
+    have hmin : 1 ≤ minLeafLen lc := by simp only [minLeafLen]; omega
+    cases plan with
+    | borrowFromLeft =>
+      obtain ⟨hpos, hdon⟩ := hspec
+      obtain ⟨csF, csB, a, b, LF, La, Lb, LB, lvF, lva, lvb, lvB, hsplit, hlenF, rfl, W, rfl, rfl⟩ :=
+        hwinL hpos
+      obtain ⟨L, pa, na, hga⟩ := hleaves a (by rw [hsplit]; simp)
+      have hLne : L ≠ [] := by
+        intro hL
+        rw [childLen_map_eq (by rw [hsplit, ← hlenF]; exact getElem?_window_fst _ _ _)
+          (absNode_leaf hga d)] at hdon
+        simp [Node.len, hL] at hdon
+      have hsim := rotateLeafRightH_sim W hga hgchild hLne
+      rw [hlenF, ← hsplit] at hsim
+      obtain ⟨h', hrun, hfr, hbd, hpost⟩ := hsim
+      exact ⟨_, h', by simp [hrun, Rebalance.mergesSiblings], hfr, hbd, rfl, hpost⟩
+    | borrowFromRight =>
+      obtain ⟨hlt, hdon⟩ := hspec
+      obtain ⟨csF, csB, a, b, LF, La, Lb, LB, lvF, lva, lvb, lvB, hsplit, hlenF, rfl, W, rfl, rfl⟩ :=
+        hwinR hlt
+      obtain ⟨R, pb, nb, hgb⟩ := hleaves b (by rw [hsplit]; simp)
+      have hR : 2 ≤ R.length := by
+        rw [childLen_map_eq (by rw [hsplit, ← hlenF]; exact getElem?_window_snd _ _ _ _)
+          (absNode_leaf hgb d)] at hdon
+        simp only [Node.len] at hdon; omega
+      have hsim := rotateLeafLeftH_sim W hgchild hgb hR
+      rw [hlenF, ← hsplit] at hsim
+      obtain ⟨h', hrun, hfr, hbd, hpost⟩ := hsim
+      exact ⟨_, h', by simp [hrun, Rebalance.mergesSiblings], hfr, hbd, rfl, hpost⟩
+    | mergeWithLeft =>
+      obtain ⟨hpos, -, -⟩ := hspec
+      obtain ⟨csF, csB, a, b, LF, La, Lb, LB, lvF, lva, lvb, lvB, hsplit, hlenF, rfl, W, rfl, rfl⟩ :=
+        hwinL hpos
+      obtain ⟨L, pa, na, hga⟩ := hleaves a (by rw [hsplit]; simp)
+      have hsim := mergeLeafPairH_sim W hga hgchild
+      rw [hlenF, ← hsplit] at hsim
+      obtain ⟨h', hrun, hfr, hbd, hpost⟩ := hsim
+      exact ⟨_, h', by simp [hrun, Rebalance.mergesSiblings], hfr, hbd, rfl, hpost⟩
+    | mergeWithRight =>
+      obtain ⟨hzero, -⟩ := hspec
+      obtain ⟨csF, csB, a, b, LF, La, Lb, LB, lvF, lva, lvb, lvB, hsplit, hlenF, rfl, W, rfl, rfl⟩ :=
+        hwinR (by omega)
+      obtain ⟨R, pb, nb, hgb⟩ := hleaves b (by rw [hsplit]; simp)
+      have hsim := mergeLeafPairH_sim W hgchild hgb
+      rw [hlenF, ← hsplit] at hsim
+      obtain ⟨h', hrun, hfr, hbd, hpost⟩ := hsim
+      exact ⟨_, h', by simp [hrun, Rebalance.mergesSiblings], hfr, hbd, rfl, hpost⟩
+  · -- branch children
+    obtain ⟨cc0, ces, hgchild⟩ := hbranches child hchildmem
+    obtain ⟨tc, htc⟩ := hall child hchildmem
+    have habschild : absF (d + 1) h child =
+        .branch (absF d h cc0) (ces.map fun e => (e.1, absF d h e.2)) :=
+      absF_of_some (absNode_branch_map hgchild (abs_branch_children hgchild htc))
+    simp only [habschild, hgchild, rebalanceBranchChild, rebalanceBranchChildH,
+      Heap.getBranch_eq hg, hplan, Option.bind_eq_bind, Option.bind_some]
+    have hspec := hspec (minBranchLen bc)
+    generalize hp : planRebalance ((c0 :: es.map (·.2)).map (absF (d + 1) h)) i es.length
+      (minBranchLen bc) = plan at hspec ⊢
+    cases plan with
+    | borrowFromLeft =>
+      obtain ⟨hpos, hdon⟩ := hspec
+      obtain ⟨csF, csB, a, b, LF, La, Lb, LB, lvF, lva, lvb, lvB, hsplit, hlenF, rfl, W, rfl, rfl⟩ :=
+        hwinL hpos
+      obtain ⟨lc0, les, hga⟩ := hbranches a (by rw [hsplit]; simp)
+      obtain ⟨ta, hta⟩ := hall a (by rw [hsplit]; simp)
+      have hles : les ≠ [] := by
+        intro hL
+        rw [childLen_map_eq (by rw [hsplit, ← hlenF]; exact getElem?_window_fst _ _ _)
+          (absNode_branch_map hga (abs_branch_children hga hta))] at hdon
+        simp [Node.len, hL] at hdon
+      have hsim := rotateBranchRightH_sim W hga hgchild hles
+      rw [hlenF, ← hsplit] at hsim
+      obtain ⟨h', hrun, hfr, hbd, hpost⟩ := hsim
+      exact ⟨_, h', by simp [hrun, Rebalance.mergesSiblings], hfr, hbd, rfl, hpost⟩
+    | borrowFromRight =>
+      obtain ⟨hlt, hdon⟩ := hspec
+      obtain ⟨csF, csB, a, b, LF, La, Lb, LB, lvF, lva, lvb, lvB, hsplit, hlenF, rfl, W, rfl, rfl⟩ :=
+        hwinR hlt
+      obtain ⟨rc0, res, hgb⟩ := hbranches b (by rw [hsplit]; simp)
+      obtain ⟨tb, htb⟩ := hall b (by rw [hsplit]; simp)
+      have hres : res ≠ [] := by
+        intro hR
+        rw [childLen_map_eq (by rw [hsplit, ← hlenF]; exact getElem?_window_snd _ _ _ _)
+          (absNode_branch_map hgb (abs_branch_children hgb htb))] at hdon
+        simp [Node.len, hR] at hdon
+      have hsim := rotateBranchLeftH_sim W hgchild hgb hres
+      rw [hlenF, ← hsplit] at hsim
+      obtain ⟨h', hrun, hfr, hbd, hpost⟩ := hsim
+      exact ⟨_, h', by simp [hrun, Rebalance.mergesSiblings], hfr, hbd, rfl, hpost⟩
+    | mergeWithLeft =>
+      obtain ⟨hpos, -, -⟩ := hspec
+      obtain ⟨csF, csB, a, b, LF, La, Lb, LB, lvF, lva, lvb, lvB, hsplit, hlenF, rfl, W, rfl, rfl⟩ :=
+        hwinL hpos
+      obtain ⟨lc0, les, hga⟩ := hbranches a (by rw [hsplit]; simp)
+      have hsim := mergeBranchPairH_sim W hga hgchild
+      rw [hlenF, ← hsplit] at hsim
+      obtain ⟨h', hrun, hfr, hbd, hpost⟩ := hsim
+      exact ⟨_, h', by simp [hrun, Rebalance.mergesSiblings], hfr, hbd, rfl, hpost⟩
+    | mergeWithRight =>
+      obtain ⟨hzero, -⟩ := hspec
+      obtain ⟨csF, csB, a, b, LF, La, Lb, LB, lvF, lva, lvb, lvB, hsplit, hlenF, rfl, W, rfl, rfl⟩ :=
+        hwinR (by omega)
+      obtain ⟨rc0, res, hgb⟩ := hbranches b (by rw [hsplit]; simp)
+      have hsim := mergeBranchPairH_sim W hgchild hgb
+      rw [hlenF, ← hsplit] at hsim
+      obtain ⟨h', hrun, hfr, hbd, hpost⟩ := hsim
+      exact ⟨_, h', by simp [hrun, Rebalance.mergesSiblings], hfr, hbd, rfl, hpost⟩
+
+/-! ## `remove_rec` -/
+
+/-- The state of a subtree after a remove below it: a well-defined subtree
+again, ids a subset of the old (the rest freed), the first leaf kept, the
+chain intact, and the frame. -/
+def SubPost (d : Nat) (h h' : Heap K V) (id : NodeId) (t' : Node K V) (ids lv : List NodeId)
+    (prev0 next0 : Option NodeId) : Prop :=
+  ∃ ids' lv', Sub h' (d + 1) id t' ids' lv' ∧ ids'.Nodup ∧ (∀ i ∈ ids', i ∈ ids) ∧
+    (∀ i ∈ ids, i ∉ ids' → h'.get i = none) ∧ lv'.head? = lv.head? ∧
+    Linked h' prev0 lv' next0 ∧ Frame h h' ids next0 (lv'.getLast?.or prev0)
+
+theorem FixPost.toSubPost {d : Nat} {h h' : Heap K V} {id : NodeId} {node' : Node K V}
+    {below lv : List NodeId} {prev0 next0 : Option NodeId}
+    (hp : FixPost d h h' id node' below lv prev0 next0) :
+    SubPost (d + 1) h h' id node' (id :: below) lv prev0 next0 := hp
+
+/-- What the simulation concludes for one subtree, by outcome. -/
+def RemovePost (lc bc : Nat) (k : K) (d : Nat) (h h' : Heap K V) (id : NodeId) (t : Node K V)
+    (ids lv : List NodeId) (prev0 next0 : Option NodeId) : Option (V × Bool) → Prop
+  | none => removeRec lc bc k t = none ∧ h' = h
+  | some (v, under) =>
+    ∃ t', removeRec lc bc k t = some (v, t', under) ∧ SubPost d h h' id t' ids lv prev0 next0
+
+/-- Two successive post-states compose. -/
+theorem subPost_trans {d : Nat} {h h' h'' : Heap K V} {id : NodeId} {t'' : Node K V}
+    {ids ids' lv lv' : List NodeId} {prev0 next0 : Option NodeId}
+    (hsubset : ∀ i ∈ ids', i ∈ ids) (hdrop : ∀ i ∈ ids, i ∉ ids' → h'.get i = none)
+    (hhead : lv'.head? = lv.head?) (hfr1 : Frame h h' ids next0 (lv'.getLast?.or prev0))
+    (hfresh : h'.fresh = h.fresh) (halloc : ∀ i ∈ ids, i < h.fresh)
+    (hnext : ∀ o, next0 = some o → o ∉ ids)
+    (h2 : SubPost d h' h'' id t'' ids' lv' prev0 next0) : SubPost d h h'' id t'' ids lv prev0 next0 := by
+  obtain ⟨ids'', lv'', hsub'', hnd'', hsubset', hdrop', hhead', hl'', hfr2⟩ := h2
+  refine ⟨ids'', lv'', hsub'', hnd'', fun i hi => hsubset i (hsubset' i hi), ?_,
+    hhead'.trans hhead, hl'', ?_⟩
+  · intro i hi hni
+    by_cases hi' : i ∈ ids'
+    · exact hdrop' i hi' hni
+    · rw [hfr2.1 i hi' (fun ho => hnext i ho hi) (by rw [hfresh]; exact halloc i hi)]
+      exact hdrop i hi hi'
+  · refine ⟨fun i hi hne hlt => ?_, fun o O p n ho hgo => hfr2.2 o O _ n ho (hfr1.2 o O p n ho hgo)⟩
+    rw [hfr2.1 i (fun hin => hi (hsubset i hin)) hne (by rw [hfresh]; exact hlt)]
+    exact hfr1.1 i hi hne hlt
+
+/-- `NextOK` survives a post-state. -/
+theorem nextOK_of_subPost {h h' : Heap K V} {ids ids' lv lv' : List NodeId}
+    {prev0 next0 : Option NodeId}
+    (hnext : NextOK h ids lv prev0 next0) (hsubset : ∀ i ∈ ids', i ∈ ids)
+    (hfr : Frame h h' ids next0 (lv'.getLast?.or prev0)) : NextOK h' ids' lv' prev0 next0 := by
+  intro o ho
+  obtain ⟨hout, O, n, hgo⟩ := hnext o ho
+  exact ⟨fun hin => hout (hsubset o hin), O, n, hfr.2 o O _ n ho hgo⟩
+
+/-! ### Kinds -/
+
+theorem chain_children {P : Option K → Option K → Node K V → Prop} :
+    ∀ (lo hi : Option K) (c0 : Node K V) (es : List (K × Node K V)), Chain P lo hi c0 es →
+      ∀ c ∈ c0 :: es.map (·.2), ∃ lo' hi', P lo' hi' c := by
+  intro lo hi c0 es
+  induction es generalizing lo c0 with
+  | nil =>
+    intro hch c hc
+    rw [List.map_nil, List.mem_singleton] at hc
+    subst hc; exact ⟨lo, hi, hch⟩
+  | cons e rest ih =>
+    obtain ⟨s, c'⟩ := e
+    intro hch c hc
+    rcases List.mem_cons.mp hc with rfl | hc
+    · exact ⟨lo, some s, hch.1⟩
+    · exact ih (some s) c' hch.2 c hc
+
+theorem shape_leaf_of_zero {lc bc : Nat} {lo hi : Option K} {t : Node K V}
+    (hs : Shape lc bc 0 lo hi t) : ∃ kvs, t = .leaf kvs := by
+  cases t with
+  | leaf kvs => exact ⟨kvs, rfl⟩
+  | branch _ _ => exact absurd hs id
+
+theorem shape_branch_of_succ {lc bc g : Nat} {lo hi : Option K} {t : Node K V}
+    (hs : Shape lc bc (g + 1) lo hi t) : ∃ t0 ts, t = .branch t0 ts := by
+  cases t with
+  | leaf _ => exact absurd hs id
+  | branch t0 ts => exact ⟨t0, ts, rfl⟩
+
+theorem record_of_abs_leaf {d : Nat} {h : Heap K V} {c : NodeId} {kvs : Leaf K V}
+    (habs : absNode (d + 1) h c = some (.leaf kvs)) :
+    ∃ p n, h.get c = some (.leaf kvs p n) := by
+  rcases hg : h.get c with _ | (⟨kvs', p, n⟩ | ⟨c0, es⟩)
+  · simp [absNode, hg] at habs
+  · rw [absNode_leaf hg] at habs
+    cases habs; exact ⟨p, n, rfl⟩
+  · rw [absNode_branch hg] at habs
+    rcases h0 : absNode d h c0 with _ | t0 <;> rw [h0] at habs
+    · cases habs
+    · rcases he : absNode.absEntries d h es with _ | ts <;> rw [he] at habs
+      · cases habs
+      · cases habs
+
+theorem record_of_abs_branch {d : Nat} {h : Heap K V} {c : NodeId} {t0 : Node K V}
+    {ts : List (K × Node K V)} (habs : absNode (d + 1) h c = some (.branch t0 ts)) :
+    ∃ c0 es, h.get c = some (.branch c0 es) := by
+  rcases hg : h.get c with _ | (⟨kvs', p, n⟩ | ⟨c0, es⟩)
+  · simp [absNode, hg] at habs
+  · rw [absNode_leaf hg] at habs; cases habs
+  · exact ⟨c0, es, rfl⟩
+
+/-! ### The leaf case -/
+
+theorem removeLeaf_sim (lc bc : Nat) (k : K) (d f : Nat) (h : Heap K V) (id : NodeId)
+    (kvs : Leaf K V) (p n : Option NodeId) (t : Node K V) (ids lv : List NodeId)
+    (prev0 next0 : Option NodeId) (hg : h.get id = some (.leaf kvs p n))
+    (hsub : Sub h (d + 1) id t ids lv) (hb : Heap.Bounded h) (hl : Linked h prev0 lv next0)
+    (hnext : NextOK h ids lv prev0 next0) :
+    ∃ res h', removeRecH lc bc k (f + 1) h id = some (res, h') ∧ Heap.Bounded h' ∧
+      h'.fresh = h.fresh ∧ RemovePost lc bc k d h h' id t ids lv prev0 next0 res := by
+  obtain ⟨rfl, rfl, rfl⟩ := sub_leaf_inv hg hsub
+  obtain ⟨kvs', hg'⟩ := linked_singleton.mp hl
+  rw [hg] at hg'
+  simp only [Option.some.injEq, NodeRec.leaf.injEq] at hg'
+  obtain ⟨rfl, rfl, rfl⟩ := hg'
+  have hrun : removeRecH lc bc k (f + 1) h id =
+      match leafRemove kvs k with
+      | none => some (none, h)
+      | some (v, kvs') =>
+        (h.write id (.leaf kvs' p n)).map fun h =>
+          (some (v, decide (kvs'.length < minLeafLen lc)), h) := by
+    rw [removeRecH]; simp only [hg]; rfl
+  rw [hrun]
+  rcases hres : leafRemove kvs k with _ | ⟨v, kvs'⟩
+  · refine ⟨none, h, ?_, hb, ?_, ?_⟩
+    · rfl
+    · rfl
+    show removeRec lc bc k (.leaf kvs) = none ∧ h = h
+    exact ⟨by rw [removeRec]; simp [hres], rfl⟩
+  · obtain ⟨h', hw⟩ := Heap.write_some (h := h) (id := id) (r := .leaf kvs' p n) (by simp [hg])
+    have hg' := Heap.get_write_self hw
+    have hfr := Heap.fresh_write hw
+    refine ⟨some (v, decide (kvs'.length < minLeafLen lc)), h', ?_, ?_, hfr, ?_⟩
+    · show (h.write id (.leaf kvs' p n)).map _ = _
+      rw [hw]; rfl
+    · refine bounded_of_subset hb hfr (fun i hi => ?_)
+      by_cases hii : i = id
+      · subst hii; simp [hg]
+      · rw [Heap.get_write_other hw hii] at hi; exact hi
+    simp only [RemovePost]
+    refine ⟨.leaf kvs', by rw [removeRec]; simp [hres], [id], [id],
+      ⟨absNode_leaf hg' d, reachIds_leaf hg' d, leafIds_leaf hg' d⟩, by simp, fun i hi => hi,
+      fun i hi hni => absurd hi hni, rfl, linked_singleton.mpr ⟨kvs', hg'⟩, ?_⟩
+    refine ⟨fun i hi _ _ => Heap.get_write_other hw (by simpa using hi), fun o O p' n' ho hgo => ?_⟩
+    obtain ⟨hout, O', n'', hgo'⟩ := hnext o ho
+    rw [hgo] at hgo'
+    cases hgo'
+    rw [Heap.get_write_other hw (by simpa using hout)]
+    exact hgo
+
+/-! ### The induction -/
+
+/-- `remove_rec` on the heap never faults, allocates nothing, returns what
+the tree model returns, and leaves the subtree in the post-state: the
+tree model's node, ids a subset of the old with the rest freed, the same
+first leaf, the chain intact, and nothing outside changed except the
+successor leaf's `prev`. -/
+theorem removeRecH_sim (lc bc : Nat) (hlc : 4 ≤ lc) (hbc : 4 ≤ bc) (k : K) :
+    ∀ (d fuel : Nat) (h : Heap K V) (id : NodeId) (t : Node K V) (ids lv : List NodeId)
+      (prev0 next0 : Option NodeId) (hgt : Nat) (isRoot : Bool) (lo hi : Option K),
+      d < fuel → Sub h (d + 1) id t ids lv → ids.Nodup → Heap.Bounded h →
+      Linked h prev0 lv next0 → NextOK h ids lv prev0 next0 →
+      WF lc bc hgt isRoot lo hi t → InBounds lo hi k →
+      ∃ res h', removeRecH lc bc k fuel h id = some (res, h') ∧ Heap.Bounded h' ∧
+        h'.fresh = h.fresh ∧ RemovePost lc bc k d h h' id t ids lv prev0 next0 res := by
+  intro d
+  induction d with
+  | zero =>
+    intro fuel h id t ids lv prev0 next0 hgt isRoot lo hi hfuel hsub hnd hb hl hnext hwf hk
+    obtain ⟨f, rfl⟩ : ∃ f, fuel = f + 1 := ⟨fuel - 1, by omega⟩
+    rcases hg : h.get id with _ | (⟨kvs, p, n⟩ | ⟨c0, es⟩)
+    · exfalso; have := hsub.reach; simp [reachIds, hg] at this
+    · exact removeLeaf_sim lc bc k 0 f h id kvs p n t ids lv prev0 next0 hg hsub hb hl hnext
+    · exact (sub_branch_zero hg hsub).elim
+  | succ d ih =>
+    intro fuel h id t ids lv prev0 next0 hgt isRoot lo hi hfuel hsub hnd hb hl hnext hwf hk
+    obtain ⟨f, rfl⟩ : ∃ f, fuel = f + 1 := ⟨fuel - 1, by omega⟩
+    rcases hg : h.get id with _ | (⟨kvs, p, n⟩ | ⟨c0, es⟩)
+    · exfalso; have := hsub.reach; simp [reachIds, hg] at this
+    · exact removeLeaf_sim lc bc k (d + 1) f h id kvs p n t ids lv prev0 next0 hg hsub hb hl hnext
+    -- The branch case.
+    have hallOld : ∀ c ∈ c0 :: es.map (·.2), ∃ t, absNode (d + 1) h c = some t :=
+      abs_branch_children hg hsub.abs
+    obtain ⟨t0, ts, below, h0, hes, rfl, hbelow, rfl, hlvb⟩ := sub_branch_inv hg hsub
+    obtain ⟨g, rfl⟩ : ∃ g, hgt = g + 1 := by
+      cases hgt with
+      | zero => exact absurd hwf (fun x => x)
+      | succ g => exact ⟨g, rfl⟩
+    obtain ⟨hs, hbk, hlenbc, hmin, hchain⟩ := hwf
+    have hid : id < h.fresh := hb id (by simp [hg])
+    have hesAB := takeWhile_append_dropWhile_entries k es
+    obtain ⟨htsA, htsB⟩ := absEntries_takeWhile k hes
+    have htsAB : ts = ts.takeWhile (sepLE k) ++ ts.dropWhile (sepLE k) :=
+      List.takeWhile_append_dropWhile.symm
+    have hcs : c0 :: es.map (·.2) =
+        frontIds c0 (es.takeWhile (sepLE k)) ++
+          lastChild c0 (es.takeWhile (sepLE k)) :: (es.dropWhile (sepLE k)).map (·.2) := by
+      have := cons_map_split c0 (es.takeWhile (sepLE k)) (es.dropWhile (sepLE k))
+      rwa [← hesAB] at this
+    -- k's bounds for the picked child
+    have hAmem : ∀ e ∈ ts.takeWhile (sepLE k), ¬ k < e.1 := by
+      intro e he
+      have := mem_takeWhile_imp he
+      simpa [sepLE] using this
+    have hBhead : ∀ e, (ts.dropWhile (sepLE k)).head? = some e → k < e.1 := by
+      intro e he
+      have := head_dropWhile_false he
+      simpa [sepLE] using this
+    have hchainAB : Chain (WF lc bc g false) lo hi t0
+        (ts.takeWhile (sepLE k) ++ ts.dropWhile (sepLE k)) := by
+      rw [← htsAB]; exact hchain
+    have hchild := chain_split _ _ _ lo hi t0 hchainAB
+    have hlenA : (ts.takeWhile (sepLE k)).length = (es.takeWhile (sepLE k)).length :=
+      absEntries_length htsA
+    have hlents : ts.length = es.length := absEntries_length hes
+    -- the abstract children are the children's abstractions
+    have hchildrenAbs : t0 :: ts.map (·.2) = (c0 :: es.map (·.2)).map (absF (d + 1) h) := by
+      rw [absEntries_eq_map hes, ← absF_of_some h0]; simp [Function.comp_def]
+    have hkindOld : ∀ c ∈ c0 :: es.map (·.2),
+        ∃ lo' hi', WF lc bc g false lo' hi' (absF (d + 1) h c) := fun c hc =>
+      chain_children lo hi t0 ts hchain _ (by rw [hchildrenAbs]; exact List.mem_map_of_mem hc)
+    -- Decompose the reach and leaf lists around the picked child.
+    rw [hcs, reachChildren_append, reachChildren_cons] at hbelow
+    rw [hcs, leafChildren_append, leafChildren_cons] at hlvb
+    rcases hLf : reachIds.reachChildren (d + 1) h (frontIds c0 (es.takeWhile (sepLE k)))
+      with _ | Lf
+    · rw [hLf] at hbelow; cases hbelow
+    rcases hLc : reachIds (d + 1) h (lastChild c0 (es.takeWhile (sepLE k))) with _ | Lc
+    · rw [hLf, hLc] at hbelow; cases hbelow
+    rcases hLb : reachIds.reachChildren (d + 1) h ((es.dropWhile (sepLE k)).map (·.2)) with _ | Lb
+    · rw [hLf, hLc, hLb] at hbelow; cases hbelow
+    rw [hLf, hLc, hLb] at hbelow
+    simp only [Option.bind_some, Option.some.injEq] at hbelow
+    subst hbelow
+    rcases hlvF : leafIds.leafChildren (d + 1) h (frontIds c0 (es.takeWhile (sepLE k)))
+      with _ | lvF
+    · rw [hlvF] at hlvb; cases hlvb
+    rcases hlvC : leafIds (d + 1) h (lastChild c0 (es.takeWhile (sepLE k))) with _ | lvC
+    · rw [hlvF, hlvC] at hlvb; cases hlvb
+    rcases hlvB : leafIds.leafChildren (d + 1) h ((es.dropWhile (sepLE k)).map (·.2)) with _ | lvB
+    · rw [hlvF, hlvC, hlvB] at hlvb; cases hlvb
+    rw [hlvF, hlvC, hlvB] at hlvb
+    simp only [Option.bind_some, Option.some.injEq] at hlvb
+    subst hlvb
+    -- Name the four pieces of the entry lists.
+    generalize hA : es.takeWhile (sepLE k) = A at *
+    generalize hB : es.dropWhile (sepLE k) = B at *
+    generalize hAt : ts.takeWhile (sepLE k) = tsA at *
+    generalize hBt : ts.dropWhile (sepLE k) = tsB at *
+    have hkC : InBounds (lastBound lo tsA) (headBound hi tsB) k := by
+      constructor
+      · intro l0 hl0
+        rcases lastBound_mem lo _ l0 hl0 with ⟨_, hl⟩ | ⟨c, hc⟩
+        · exact hk.1 l0 hl
+        · exact not_lt.mp (hAmem (l0, c) hc)
+      · intro h0' hh0
+        cases tsB with
+        | nil => exact hk.2 h0' hh0
+        | cons e rest =>
+          simp only [headBound, Option.some.injEq] at hh0
+          subst hh0
+          exact hBhead e rfl
+    -- Bookkeeping facts about the pieces.
+    have hnd' := List.nodup_cons.mp hnd
+    obtain ⟨hidnb, hndb⟩ := hnd'
+    obtain ⟨hLfNd, hrest⟩ := (nodup_append_iff _ _).mp hndb
+    obtain ⟨hLcLbNd, hFdisj⟩ := hrest
+    obtain ⟨hLcNd, hLbNd, hCBdisj⟩ := (nodup_append_iff _ _).mp hLcLbNd
+    have halloc : ∀ i ∈ id :: (Lf ++ (Lc ++ Lb)), (h.get i).isSome :=
+      mem_reachIds_allocated (d + 2) h id _ hsub.reach
+    obtain ⟨_, hlvFsub⟩ := (leaf_facts (d + 1)).2 h _ Lf lvF hLf hlvF
+    obtain ⟨hlvCne, hlvCsub⟩ := (leaf_facts (d + 1)).1 h _ Lc lvC hLc hlvC
+    obtain ⟨_, hlvBsub⟩ := (leaf_facts (d + 1)).2 h _ Lb lvB hLb hlvB
+    have hlvFmem : ∀ i ∈ lvF, i ∈ Lf := fun i hi => hlvFsub.subset hi
+    have hlvCmem : ∀ i ∈ lvC, i ∈ Lc := fun i hi => hlvCsub.subset hi
+    have hlvBmem : ∀ i ∈ lvB, i ∈ Lb := fun i hi => hlvBsub.subset hi
+    have hlvBNd : lvB.Nodup := hLbNd.sublist hlvBsub
+    -- The child's own bookkeeping.
+    have hsubC : Sub h (d + 1) (lastChild c0 A) (lastChild t0 tsA) Lc lvC :=
+      ⟨absNode_lastChild h0 htsA, hLc, hlvC⟩
+    have hl' := hl
+    rw [linked_append] at hl'
+    obtain ⟨hlF, hlCB⟩ := hl'
+    rw [linked_append] at hlCB
+    obtain ⟨hlC, hlB⟩ := hlCB
+    have hnextC : NextOK h Lc lvC (lvF.getLast?.or prev0) (lvB.head?.or next0) := by
+      intro o ho
+      cases lvB with
+      | nil =>
+        simp only [List.head?_nil, Option.none_or] at ho
+        obtain ⟨hno, O, n, hgo⟩ := hnext o ho
+        refine ⟨fun hin => hno (List.mem_cons_of_mem _ (List.mem_append_right _
+          (List.mem_append_left _ hin))), O, n, ?_⟩
+        rw [hgo]
+        congr 2
+        first
+          | rfl
+          | rw [List.append_nil, List.getLast?_append, Option.or_assoc]
+          | simp [List.getLast?_append, Option.or_assoc]
+      | cons a rest =>
+        simp only [List.head?_cons, Option.some_or, Option.some.injEq] at ho
+        subst ho
+        obtain ⟨⟨O, hga⟩, _⟩ := hlB
+        refine ⟨fun hin => hCBdisj a hin a (hlvBmem a List.mem_cons_self) rfl, O, _, hga⟩
+    obtain ⟨resC, h', hrec, hb', hfr', hpostC⟩ :=
+      ih f h _ _ Lc lvC (lvF.getLast?.or prev0) (lvB.head?.or next0) g false _ _ (by omega) hsubC
+        hLcNd hb hlC hnextC hchild hkC
+    have hspecC := removeRec_spec lc bc hlc hbc k g (lastChild t0 tsA) false _ _ hchild hkC
+    -- Facts shared by both outcomes of the child.
+    have hidLc : id ∉ Lc := fun hin => hidnb (List.mem_append_right _ (List.mem_append_left _ hin))
+    have hidLb : id ∉ Lb := fun hin => hidnb (List.mem_append_right _ (List.mem_append_right _ hin))
+    have hidLf : id ∉ Lf := fun hin => hidnb (List.mem_append_left _ hin)
+    have hFalloc : ∀ i ∈ Lf, (h.get i).isSome := fun i hi =>
+      halloc i (List.mem_cons_of_mem _ (List.mem_append_left _ hi))
+    have hBalloc : ∀ i ∈ Lb, (h.get i).isSome := fun i hi =>
+      halloc i (List.mem_cons_of_mem _ (List.mem_append_right _ (List.mem_append_right _ hi)))
+    have hnext0F : ∀ o, next0 = some o → o ∉ Lf := fun o ho hin =>
+      (hnext o ho).1 (List.mem_cons_of_mem _ (List.mem_append_left _ hin))
+    have hnext0B : ∀ o, next0 = some o → o ∉ Lb := fun o ho hin =>
+      (hnext o ho).1 (List.mem_cons_of_mem _ (List.mem_append_right _ (List.mem_append_right _ hin)))
+    have hnext0id : ∀ o, next0 = some o → o ≠ id := fun o ho heq =>
+      (hnext o ho).1 (by rw [heq]; exact List.mem_cons_self)
+    have hnextCid : lvB.head?.or next0 ≠ some id := by
+      cases hh : lvB.head? with
+      | none => simp; intro ho; exact hnext0id id ho rfl
+      | some a =>
+        simp; intro heq; subst heq
+        exact hidLb (hlvBmem _ (List.mem_of_mem_head? hh))
+    have hnotLc : ∀ i, i ∈ Lf ∨ i ∈ Lb → i ∉ Lc := by
+      rintro i (hi | hi) hin
+      · exact hFdisj i hi i (List.mem_append_left _ hin) rfl
+      · exact hCBdisj i hin i hi rfl
+    have hallocLt : ∀ i ∈ id :: (Lf ++ (Lc ++ Lb)), i < h.fresh := fun i hi => hb i (halloc i hi)
+    have hnextOut : ∀ o, next0 = some o → o ∉ id :: (Lf ++ (Lc ++ Lb)) := fun o ho => (hnext o ho).1
+    rcases resC with _ | ⟨v, under⟩
+    · -- Not found below: this branch is untouched.
+      simp only [RemovePost] at hpostC
+      obtain ⟨hres, heq⟩ := hpostC
+      refine ⟨none, h', ?_, hb', hfr', ?_⟩
+      · rw [removeRecH]; simp only [hg, hA, hrec]
+      · show removeRec lc bc k (.branch t0 ts) = none ∧ h' = h
+        refine ⟨?_, heq⟩
+        rw [removeRec]; simp only [hAt, hBt, hres]
+    -- Found below: the child changed in place.
+    simp only [RemovePost] at hpostC
+    obtain ⟨tc', hres, Lc', lvC', hsubC', hLc'Nd, hLc'sub, hdropC, hheadC, hlC', hfrC⟩ := hpostC
+    simp only [hres] at hspecC
+    obtain ⟨-, -, hshapeC, -⟩ := hspecC
+    obtain ⟨hsameF, hunchF⟩ := frame_consequences hfrC rfl hb hlB
+      (fun i hi => hnotLc i (Or.inl hi)) hFalloc hnext0F
+    obtain ⟨hsameB, hunchB⟩ := frame_consequences hfrC rfl hb hlB
+      (fun i hi => hnotLc i (Or.inr hi)) hBalloc hnext0B
+    have hid' : h'.get id = some (.branch c0 es) := by
+      rw [hfrC.1 id hidLc hnextCid hid]; exact hg
+    obtain ⟨hLf', habsF, hlvF'⟩ := children_congr (d + 1) _ Lf hLf hsameF
+    obtain ⟨hLb', habsB, hlvB'⟩ := children_congr (d + 1) _ Lb hLb hsameB
+    rcases hrl : replaceLast t0 tsA tc' with ⟨t0', A'⟩
+    obtain ⟨habs0, habsA⟩ := abs_replaceLast h0 htsA habsF hsubC'.abs
+    rw [hrl] at habs0 habsA
+    have habsB' : absNode.absEntries (d + 1) h' B = some tsB := by
+      rw [absEntries_congr (fun e he => habsB e.2 (List.mem_map_of_mem he))]; exact htsB
+    have hlvC'ne : lvC' ≠ [] := ((leaf_facts (d + 1)).1 h' _ Lc' lvC' hsubC'.reach hsubC'.leaves).1
+    -- The intermediate state: the branch with its child replaced.
+    have hreachMid : reachIds.reachChildren (d + 1) h' (c0 :: es.map (·.2)) =
+        some (Lf ++ (Lc' ++ Lb)) := by
+      rw [hcs, reachChildren_append, reachChildren_cons, hLf', hsubC'.reach, hLb']; rfl
+    have hlvMid : leafIds.leafChildren (d + 1) h' (c0 :: es.map (·.2)) =
+        some (lvF ++ (lvC' ++ lvB)) := by
+      rw [hcs, leafChildren_append, leafChildren_cons, hlvF', hlvF, hsubC'.leaves, hlvB', hlvB]; rfl
+    have hsubMid : Sub h' (d + 2) id (.branch t0' (A' ++ tsB)) (id :: (Lf ++ (Lc' ++ Lb)))
+        (lvF ++ (lvC' ++ lvB)) := by
+      refine ⟨?_, ?_, ?_⟩
+      · rw [absNode_branch hid', habs0]
+        simp only [Option.bind_some]
+        rw [hesAB, absEntries_append, habsA]
+        simp only [Option.bind_some]
+        rw [habsB']
+        rfl
+      · rw [reachIds_branch hid', hreachMid]; rfl
+      · rw [leafIds_branch hid', hlvMid]
+    have hndMid : (id :: (Lf ++ (Lc' ++ Lb))).Nodup := by
+      rw [List.nodup_cons, nodup_append_iff, nodup_append_iff]
+      refine ⟨?_, hLfNd, ⟨hLc'Nd, hLbNd, ?_⟩, ?_⟩
+      · intro hin
+        rcases List.mem_append.mp hin with hin | hin
+        · exact hidLf hin
+        rcases List.mem_append.mp hin with hin | hin
+        · exact hidLc (hLc'sub id hin)
+        · exact hidLb hin
+      · intro a ha b hb'
+        exact hCBdisj a (hLc'sub a ha) b hb'
+      · intro a ha b hb'
+        rcases List.mem_append.mp hb' with hb' | hb'
+        · exact hFdisj a ha b (List.mem_append_left _ (hLc'sub b hb'))
+        · exact hFdisj a ha b (List.mem_append_right _ hb')
+    have hsubsetMid : ∀ i ∈ id :: (Lf ++ (Lc' ++ Lb)), i ∈ id :: (Lf ++ (Lc ++ Lb)) := by
+      intro i hi
+      rcases List.mem_cons.mp hi with rfl | hi
+      · exact List.mem_cons_self
+      rcases List.mem_append.mp hi with hi | hi
+      · exact List.mem_cons_of_mem _ (List.mem_append_left _ hi)
+      rcases List.mem_append.mp hi with hi | hi
+      · exact List.mem_cons_of_mem _ (List.mem_append_right _ (List.mem_append_left _ (hLc'sub i hi)))
+      · exact List.mem_cons_of_mem _ (List.mem_append_right _ (List.mem_append_right _ hi))
+    have hdropMid : ∀ i ∈ id :: (Lf ++ (Lc ++ Lb)), i ∉ id :: (Lf ++ (Lc' ++ Lb)) →
+        h'.get i = none := by
+      intro i hi hni
+      simp only [List.mem_cons, List.mem_append, not_or] at hi hni
+      rcases hi with hi | hi | hi | hi
+      · exact absurd hi hni.1
+      · exact absurd hi hni.2.1
+      · exact hdropC i hi hni.2.2.1
+      · exact absurd hi hni.2.2.2
+    have hheadMid : (lvF ++ (lvC' ++ lvB)).head? = (lvF ++ (lvC ++ lvB)).head? := by
+      cases lvF with
+      | nil =>
+        simp only [List.nil_append]
+        rw [head?_append_of_ne_nil _ hlvC'ne, head?_append_of_ne_nil _ hlvCne, hheadC]
+      | cons a t => rfl
+    have hlMid : Linked h' prev0 (lvF ++ (lvC' ++ lvB)) next0 := by
+      have := linked_reassemble (lvC' := lvC') (by rw [List.append_assoc]; exact hl) hlC'
+        hheadC (fun i hi => hunchF i (hlvFmem i hi) ?_) ?_ ?_
+      · rwa [List.append_assoc] at this
+      · intro heq
+        have ha := List.mem_of_mem_head? heq
+        exact hFdisj i (hlvFmem i hi) i (List.mem_append_right _ (hlvBmem i ha)) rfl
+      · intro a rest hlvBeq O p n hga
+        exact hfrC.2 a O p n (by rw [hlvBeq]; rfl) hga
+      · intro a rest hlvBeq i hi
+        apply hunchB i (hlvBmem i (by rw [hlvBeq]; exact List.mem_cons_of_mem _ hi))
+        rw [hlvBeq]
+        intro heq
+        simp at heq
+        subst heq
+        have := hlvBNd; rw [hlvBeq] at this
+        exact (List.nodup_cons.mp this).1 hi
+    have hfrMid : Frame h h' (id :: (Lf ++ (Lc ++ Lb))) next0
+        ((lvF ++ (lvC' ++ lvB)).getLast?.or prev0) := by
+      refine ⟨fun i hi hio hlt => ?_, fun o O p n ho hgo => ?_⟩
+      · apply hfrC.1 i (fun hin => hi (List.mem_cons_of_mem _ (List.mem_append_right _
+          (List.mem_append_left _ hin)))) _ hlt
+        cases hh : lvB.head? with
+        | none => simpa using hio
+        | some a =>
+          simp
+          intro heq; subst heq
+          exact hi (List.mem_cons_of_mem _ (List.mem_append_right _ (List.mem_append_right _
+            (hlvBmem _ (List.mem_of_mem_head? hh)))))
+      · cases hlvBcase : lvB with
+        | nil =>
+          subst hlvBcase
+          rw [hfrC.2 o O p n (by simpa using ho) hgo]
+          try (congr 2)
+          try simp only [List.append_nil, List.getLast?_append, Option.or_assoc]
+        | cons a rest =>
+          subst hlvBcase
+          have hoa : o ≠ a := fun heq => hnext0B o ho (hlvBmem o (by rw [heq]; exact List.mem_cons_self))
+          rw [hfrC.1 o (fun hin => (hnext o ho).1 (List.mem_cons_of_mem _
+            (List.mem_append_right _ (List.mem_append_left _ hin))))
+            (by simpa using (Ne.symm hoa)) (hb o (by simp [hgo])), hgo]
+          obtain ⟨hno, O', n', hgo'⟩ := hnext o ho
+          rw [hgo] at hgo'
+          simp only [Option.some.injEq, NodeRec.leaf.injEq] at hgo'
+          obtain ⟨_, hp, _⟩ := hgo'
+          try rw [hp]
+          try (congr 2)
+          try rw [getLast?_append_cons, getLast?_append_cons]
+    have hpostMid : SubPost (d + 1) h h' id (.branch t0' (A' ++ tsB)) (id :: (Lf ++ (Lc ++ Lb)))
+        (lvF ++ (lvC ++ lvB)) prev0 next0 :=
+      ⟨_, _, hsubMid, hndMid, hsubsetMid, hdropMid, hheadMid, hlMid, hfrMid⟩
+    cases under with
+    | false =>
+      refine ⟨some (v, false), h', ?_, hb', hfr', ?_⟩
+      · rw [removeRecH]; simp only [hg, hA, hrec]; simp
+      · show ∃ t', removeRec lc bc k (.branch t0 ts) = some (v, t', false) ∧
+          SubPost (d + 1) h h' id t' (id :: (Lf ++ (Lc ++ Lb))) (lvF ++ (lvC ++ lvB)) prev0 next0
+        refine ⟨_, ?_, hpostMid⟩
+        rw [removeRec]; simp only [hAt, hBt, hres, hrl]; simp
+    | true =>
+      -- The child is one short: repair it here.
+      have hallMid : ∀ c ∈ c0 :: es.map (·.2), ∃ t, absNode (d + 1) h' c = some t := by
+        intro c hc
+        have hcOld := hallOld c hc
+        rw [hcs] at hc
+        rcases List.mem_append.mp hc with hc | hc
+        · rw [habsF c hc]; exact hcOld
+        rcases List.mem_cons.mp hc with rfl | hc
+        · exact ⟨_, hsubC'.abs⟩
+        · rw [habsB c hc]; exact hcOld
+      have hkindAbs : ∀ c ∈ c0 :: es.map (·.2),
+          ∃ tc lo' hi', absNode (d + 1) h' c = some tc ∧ Shape lc bc g lo' hi' tc := by
+        intro c hc
+        obtain ⟨tOld, hOld⟩ := hallOld c hc
+        obtain ⟨lo', hi', hwfOld⟩ := hkindOld c hc
+        rw [absF_of_some hOld] at hwfOld
+        rw [hcs] at hc
+        rcases List.mem_append.mp hc with hc | hc
+        · exact ⟨tOld, lo', hi', by rw [habsF c hc]; exact hOld, shape_of_wf hwfOld⟩
+        rcases List.mem_cons.mp hc with rfl | hc
+        · exact ⟨tc', _, _, hsubC'.abs, hshapeC⟩
+        · exact ⟨tOld, lo', hi', by rw [habsB c hc]; exact hOld, shape_of_wf hwfOld⟩
+      have hkindMid : (∀ c ∈ c0 :: es.map (·.2), ∃ kvs p n, h'.get c = some (.leaf kvs p n)) ∨
+          (∀ c ∈ c0 :: es.map (·.2), ∃ c0' es', h'.get c = some (.branch c0' es')) := by
+        cases g with
+        | zero =>
+          left
+          intro c hc
+          obtain ⟨tc, lo', hi', habs, hsh⟩ := hkindAbs c hc
+          obtain ⟨kvs, rfl⟩ := shape_leaf_of_zero hsh
+          obtain ⟨p, n, hgc⟩ := record_of_abs_leaf habs
+          exact ⟨kvs, p, n, hgc⟩
+        | succ g' =>
+          right
+          intro c hc
+          obtain ⟨tc, lo', hi', habs, hsh⟩ := hkindAbs c hc
+          obtain ⟨a, b, rfl⟩ := shape_branch_of_succ hsh
+          exact record_of_abs_branch habs
+      have hlenA' : A.length ≤ es.length := by rw [hesAB]; simp
+      have hlen1 : 1 ≤ es.length := by
+        rw [← hlents]
+        split at hmin <;> omega
+      have hnextMid := nextOK_of_subPost hnext hsubsetMid hfrMid
+      obtain ⟨under', h'', hfix, hfr'', hbd'', hunder, hpostFix⟩ :=
+        fixBranchChildH_sim lc bc (by omega) hid' hreachMid hlvMid hallMid hkindMid hlenA' hlen1
+          hndMid hb' hlMid hnextMid
+      have hnodeEq : Node.branch (absF (d + 1) h' c0) (es.map fun e => (e.1, absF (d + 1) h' e.2)) =
+          .branch t0' (A' ++ tsB) := by
+        have h1 := absNode_branch_map hid' hallMid
+        have h2 := hsubMid.abs
+        rw [h1] at h2
+        exact Option.some.inj h2
+      rw [hnodeEq] at hunder hpostFix
+      rcases hfixT : fixBranchChild lc bc (.branch t0' (A' ++ tsB)) A.length with ⟨node', under''⟩
+      rw [hfixT] at hunder hpostFix
+      simp only at hunder hpostFix
+      refine ⟨some (v, under'), h'', ?_, hbd'', hfr''.trans hfr', ?_⟩
+      · rw [removeRecH]; simp only [hg, hA, hrec]; simp [hfix]
+      · show ∃ t', removeRec lc bc k (.branch t0 ts) = some (v, t', under') ∧
+          SubPost (d + 1) h h'' id t' (id :: (Lf ++ (Lc ++ Lb))) (lvF ++ (lvC ++ lvB)) prev0 next0
+        refine ⟨node', ?_, ?_⟩
+        · rw [removeRec]; simp only [hAt, hBt, hres, hrl]; simp [hlenA, hfixT, hunder]
+        · exact subPost_trans hsubsetMid hdropMid hheadMid hfrMid hfr' hallocLt hnextOut
+            hpostFix.toSubPost
+
 end HeapRemove
 
 end BPlusTree
