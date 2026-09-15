@@ -96,8 +96,11 @@ than the code until the code has been refactored to match.
 **Status:** `lean/BPlusTree/Model/Leaf.lean`, `Model/Branch.lean`, and
 `Model/Tree.lean` port `insert.rs` in full (`leafInsertOrSplit`,
 `branchApplySplit`, `branchInsertAndSplit`, `growRoot`, `insertRec`,
-`insertTree`) and define `Node.toList`. Delete, range, and get are not
-started.
+`insertTree`) and define `Node.toList`. `Model/Delete.lean` ports
+`delete.rs` in full (`leafRemove`, `planRebalance`, the two leaf and two
+branch rotations, the two merges, `fixBranchChild`, `removeRec`,
+`consolidateRootChildren`, `checkRootCollapse`, `removeTree`), checked
+only by the replay so far. Range and get are not started.
 
 ## Phase 2b — the heap model (memory safety)
 
@@ -228,8 +231,11 @@ In this order, because difficulty rises sharply:
    are 64-bit FNV-1a digests of the shape (small traces, frequent
    checks) with one full shape at the end; on a mismatch the driver
    reruns the generator to print both shapes at the failing op. CI runs
-   it on every push. Extend the trace format with `R k` and `G k` as the
-   model gains `remove` and `get`.
+   it on every push. Traces now mix inserts and removes (`I k v old`,
+   `R k res`, return values checked too) and end with a drain to the
+   empty tree, so every rebalance and root-collapse path in `delete.rs`
+   is compared against the model: about 150k ops and 30k checks in nine
+   seconds. Add `G k` when the model gains `get`.
 2. Cite proofs from the code: a one-line comment at each Rust site that
    a lemma justifies (split arithmetic, merge fit, the depth bound).
 3. Add the uniform-depth check to `check_invariants_detailed` (cheap:
@@ -298,6 +304,7 @@ lean/
   BPlusTree/Model/Branch.lean   -- branch half, root growth (done)
   BPlusTree/Model/Spec.lean     -- insertSorted, the abstract spec (done)
   BPlusTree/Model/Tree.lean     -- Node, toList, insertRec, insertTree (done)
+  BPlusTree/Model/Delete.lean   -- delete.rs, node by node (done; unproved)
   BPlusTree/Model/Heap.lean     -- Phase 2b
   BPlusTree/Proofs/Leaf.lean    -- leaf split and insert theorems (done)
   BPlusTree/Proofs/Branch.lean  -- branch split, apply-split, root growth (done)

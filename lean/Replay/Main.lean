@@ -12,9 +12,13 @@ splits, same separators, same leaf contents, not just the same map.
 Trace format (one op or check per line):
 
     CAPS <leaf_cap> <branch_cap>
-    I <key> <value>
+    I <key> <value> <old value or ->
+    R <key> <removed value or ->
     # <fnv1a-64 of the shape, 16 hex digits>
     = <shape>
+
+The value fields are what the Rust call returned; the model's return
+value must agree.
 
 Shapes: a leaf is `(k:v k:v ...)`, a branch is `[child sep child ...]`.
 Digest lines are the cheap, frequent check; a full shape line normally
@@ -41,6 +45,10 @@ partial def shape : Node Int Int → String
   | .branch c0 entries =>
     "[" ++ shape c0 ++ String.join (entries.map fun (s, c) => s!" {s} " ++ shape c) ++ "]"
 
+def optStr : Option Int → String
+  | some v => toString v
+  | none => "-"
+
 structure Outcome where
   ok : Bool
   ops : Nat
@@ -60,9 +68,26 @@ def replayFile (path : System.FilePath) : IO Outcome := do
     | ["CAPS", l, b] =>
       lc := l.toNat!
       bc := b.toNat!
-    | ["I", k, v] =>
-      root := (insertTree lc bc root k.toInt! v.toInt!).1
+    | ["I", k, v, old] =>
+      let (root', got) := insertTree lc bc root k.toInt! v.toInt!
+      root := root'
       ops := ops + 1
+      if optStr got != old then
+        IO.eprintln s!"{path}:{lineNo}: insert {k} returned {optStr got} in the model, {old} in Rust"
+        return { ok := false, ops, checks }
+    | ["R", k, res] =>
+      let got := removeTree lc bc root k.toInt!
+      ops := ops + 1
+      match got with
+      | some (v, root') =>
+        root := root'
+        if toString v != res then
+          IO.eprintln s!"{path}:{lineNo}: remove {k} returned {v} in the model, {res} in Rust"
+          return { ok := false, ops, checks }
+      | none =>
+        if res != "-" then
+          IO.eprintln s!"{path}:{lineNo}: remove {k} found nothing in the model, {res} in Rust"
+          return { ok := false, ops, checks }
     | ["#", expected] =>
       let got := hex16 (fnv1a (shape root))
       if got == expected then

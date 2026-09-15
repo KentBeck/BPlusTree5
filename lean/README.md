@@ -11,19 +11,29 @@ only core `Std`). CI runs it on every push.
 ## Replay
 
 `./lean/replay.sh` (from the repo root) builds `examples/gen_trace.rs`,
-runs eight insert-only configurations against the Rust tree (leaf and
-branch capacities from 4×4 to 32×256, key spaces from heavy-duplicate to
-sparse), and writes each operation plus, at intervals, a 64-bit FNV-1a
-digest of the tree's shape as `dump_shape` renders it, with the full
-shape once at the end. `lake exe replay` replays every operation through
-`insertTree`, renders its tree the same way, and compares digests and
-the final shape. Digests keep the traces small, so the large
+runs nine configurations of mixed inserts and removes against the Rust
+tree (leaf and branch capacities from 4×4 to 32×256, key spaces from
+heavy-duplicate to sparse, the fuzz suite's remove ratio and a
+remove-heavy one, each followed by a drain that removes every remaining
+key down to the empty tree), and writes each operation with its return
+value plus, at intervals, a 64-bit FNV-1a digest of the tree's shape as
+`dump_shape` renders it, with the full shape once at the end.
+`lake exe replay` replays every operation through `insertTree` and
+`removeTree`, checks each return value, renders its tree the same way,
+and compares digests and the final shape. With
+`cargo build --features delete_profile --example gen_trace` the generator
+also reports how many leaf and branch borrows, merges, and root
+collapses a trace exercised. Digests keep the traces small, so the large
 configurations check every 10 to 100 operations. On a mismatch the Lean
 side prints its shape and the script reruns the generator to print the
 Rust shape at the same operation, with a token diff. CI runs it on every
 push. FNV rather than a cryptographic hash because neither side is
 adversarial and both implementations are ten lines that can be compared
 by eye.
+
+The replay is the only check on the delete model so far: its theorems
+are not written yet, so shape equality across these traces is what
+currently ties `removeTree` to `delete.rs`.
 
 A shape match is stronger than the differential fuzz's map comparison:
 it checks the same splits, the same separators, and the same leaf
@@ -61,6 +71,15 @@ link a reviewer checks by eye.
 | `dump_shape` / `shape_hash` (test-only, `compat_test_api`) | `shape` / `fnv1a` (`Replay/Main.lean`) | compared on every replayed trace |
 | the leaves' entries left to right (what `items()` yields) | `Node.toList` (`Model/Tree.lean`) | `insertTree_toList`: insert = `insertSorted` on it |
 | sorted-association-list insert (the spec) | `insertSorted` (`Model/Spec.lean`) | |
+| `keys[]` / `children[]` view of a branch | `Node.keysOf`, `Node.childrenOf`, `mkBranch` (`Model/Delete.lean`) | |
+| `leaf_remove` | `leafRemove` | replay |
+| `plan_rebalance`, `child_len` | `planRebalance`, `childLen` | replay |
+| `rotate_leaf_right` / `rotate_leaf_left` / `merge_leaf_pair` | same names | replay |
+| `rotate_branch_right` / `rotate_branch_left` / `merge_branch_pair` | same names | replay |
+| `rebalance_leaf_child` / `rebalance_branch_child` / `fix_branch_child` | same names | replay |
+| `remove_rec` | `removeRec` | replay |
+| `consolidate_root_children` + `absorb_root_child` | `consolidateRootChildren` | replay |
+| `check_root_collapse`, `remove` | `checkRootCollapse`, `removeTree` | replay |
 
 What the two main theorems say, given a sorted leaf within capacity:
 
@@ -102,5 +121,5 @@ separators.
 previously stored under `k` (present iff some value is returned). With
 `insertTree_wf` this is the complete Phase 1 statement for insert.
 
-Not modelled here: `remove`, `range`, `get`, node memory, and sibling
-pointers. Those are the next phases.
+Not modelled here: `range`, `get`, node memory, and sibling pointers.
+Not yet proved: anything about `removeTree`.

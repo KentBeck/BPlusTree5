@@ -2,6 +2,7 @@ import BPlusTree.Model.Spec
 import BPlusTree.Model.Leaf
 import BPlusTree.Model.Branch
 import BPlusTree.Model.Tree
+import BPlusTree.Model.Delete
 import BPlusTree.Proofs.Leaf
 import BPlusTree.Proofs.Spec
 import BPlusTree.Proofs.Branch
