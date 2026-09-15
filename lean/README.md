@@ -20,7 +20,12 @@ value plus, at intervals, a 64-bit FNV-1a digest of the tree's shape as
 `dump_shape` renders it, with the full shape once at the end.
 `lake exe replay` replays every operation through `insertTree` and
 `removeTree`, checks each return value, renders its tree the same way,
-and compares digests and the final shape. With
+and compares digests and the final shape. At intervals the generator
+also records the read paths: `get` of a random key, `first`, `last`,
+and `range` with random bounds of every kind (unbounded, included,
+excluded, in either order); the replayer answers each from `getTree`,
+`firstTree`, `lastTree`, and `rangeTree` and compares the results, the
+range as an item count plus a digest of the items. With
 `cargo build --features delete_profile --example gen_trace` the generator
 also reports how many leaf and branch borrows, merges, and root
 collapses a trace exercised. Digests keep the traces small, so the large
@@ -31,13 +36,16 @@ push. FNV rather than a cryptographic hash because neither side is
 adversarial and both implementations are ten lines that can be compared
 by eye.
 
-The delete model is both replayed and proved (`Proofs/Delete.lean`).
+The delete and read models are both replayed and proved
+(`Proofs/Delete.lean`, `Proofs/Read.lean`).
 
 A shape match is stronger than the differential fuzz's map comparison:
 it checks the same splits, the same separators, and the same leaf
 contents, so it is the evidence that the model is the code and not just
-a model of the same map. Traces cover insert only until the model has
-`remove`.
+a model of the same map. The range queries are also what ties the
+model's one assumption about the leaf sibling chain to the Rust: the
+model treats the chain as leaf order, the Rust checker verifies that at
+every check line, and the ranges walk it.
 
 ## Correspondence
 
@@ -78,6 +86,11 @@ link a reviewer checks by eye.
 | `remove_rec` | `removeRec` | `removeRec_spec` |
 | `check_root_collapse`, `remove` | `checkRootCollapse`, `removeTree` | `removeTree_spec` |
 | sorted-association-list removal (the spec) | `eraseSorted` (`Model/Spec.lean`) | |
+| `leaf_for_key` / `child_for_key` | `leafForKey` (`Model/Read.lean`), with the entries of the leaves either side | `leafForKey_spec`: `toList = pre ++ leaf ++ post`, `pre < k < post` |
+| `leaf_search`, `get` | `leafSearch`, `getTree` | `getTree_spec`: `get k = some v ↔ (k, v) ∈ toList` |
+| `leftmost_leaf`, `first` / `rightmost_leaf`, `last` | `leftmostLeaf`, `firstTree` / `rightmostLeaf`, `lastTree` | `firstTree_spec`, `lastTree_spec`: head and last of `toList` |
+| `Bound`, `cut_in_leaf`, `resolve_front`, `resolve_back`, `make_items`, `range`, `items` | `Bound` (`Model/Spec.lean`), `cutInLeaf`, `resolveFront`, `resolveBack`, `makeItems`, `rangeTree`, `itemsTree` | `rangeTree_spec`, `itemsTree_spec` |
+| the entries between two bounds (the spec) | `rangeSorted` (`Model/Spec.lean`) | |
 
 What the two main theorems say, given a sorted leaf within capacity:
 
@@ -147,4 +160,24 @@ remaining `debug_assert!`s there name the preconditions the theorems
 supply, and `check_root_collapse` is now the two-case function
 `checkRootCollapse` mirrors.
 
-Not modelled here: `range`, `get`, node memory, and sibling pointers.
+What the read theorems say, for a well-formed tree (`Proofs/Read.lean`):
+
+- `getTree_spec`: `get k` returns `some v` exactly when `(k, v)` is an
+  entry. The descent lemma behind it, `leafForKey_spec`, splits `toList`
+  into the entries before the reached leaf (all below `k`), the leaf, and
+  the entries after it (all above `k`).
+- `firstTree_spec`, `lastTree_spec`: `first` and `last` are the head and
+  last entry of `toList`, with the leftmost and rightmost leaves nonempty
+  whenever they are not the root.
+- `rangeTree_spec`: `range` yields `rangeSorted start stop toList`, the
+  entries between the bounds, for every combination of unbounded,
+  included and excluded bounds, inverted ones included; `itemsTree_spec`
+  is the unbounded case. The proof turns the model's positions into
+  counts: on a sorted list the entries below the start bound form a
+  prefix, and so do those within the end bound, so `resolve_front` lands
+  on the first count, `resolve_back` on the second, and the slice
+  between them is the spec. The only fact about the sibling chain the
+  model relies on is that it lists the leaves in tree order, which the
+  Rust invariant checker verifies.
+
+Not modelled here: node memory and the sibling pointers themselves.

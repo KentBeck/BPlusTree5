@@ -100,8 +100,12 @@ than the code until the code has been refactored to match.
 `insertTree`) and define `Node.toList`. `Model/Delete.lean` ports
 `delete.rs` in full (`leafRemove`, `planRebalance`, the two leaf and two
 branch rotations, the two merges, `fixBranchChild`, `removeRec`,
-`checkRootCollapse`, `removeTree`), replayed and proved. Range and get
-are not started.
+`checkRootCollapse`, `removeTree`), replayed and proved. `Model/Read.lean`
+ports `get.rs` and the read paths of `iterate.rs` (`leafForKey`,
+`leafSearch`, `getTree`, `leftmostLeaf`, `rightmostLeaf`, `firstTree`,
+`lastTree`, `cutInLeaf`, `resolveFront`, `resolveBack`, `makeItems`,
+`rangeTree`), replayed and proved. Every public operation the plan
+lists is now modelled and proved at the tree level.
 
 ## Phase 2b — the heap model (memory safety)
 
@@ -176,7 +180,12 @@ Miri own it.
 
 In this order, because difficulty rises sharply:
 
-1. `get`, `first`, `last`, `contains_key` — read-only, warm-up.
+1. ~~`get`, `first`, `last`, `contains_key`~~ — DONE
+   (`lean/BPlusTree/Proofs/Read.lean`). `leafForKey_spec` is the descent
+   lemma (`toList = pre ++ leaf ++ post` with `pre < k < post`);
+   `getTree_spec` is `get k = some v ↔ (k, v) ∈ toList`; `firstTree_spec`
+   and `lastTree_spec` are head and last of `toList`. `contains_key` is
+   `get` in the Rust and needs no model of its own.
 2. `insert` including root growth. Key lemmas, all `omega` once the
    model is right, for every `cap ≥ 4`:
    - ~~leaf split~~ — DONE (`lean/BPlusTree/Proofs/Leaf.lean`).
@@ -207,10 +216,18 @@ In this order, because difficulty rises sharply:
      left to right; `insertTree_toList` gives
      `toList (insert k v t) = insertSorted k v (toList t)` and the
      returned old value. Insert is complete at the model level.
-3. `range` bound resolution: `cut_in_leaf` with `after_equal`, the
-   hop to the next/previous leaf when the cut sits at an edge, and the
-   inverted-bounds check in `make_items`. Double-ended iteration:
-   `next` and `next_back` together enumerate exactly the filtered list.
+3. ~~`range` bound resolution~~ — DONE (`Proofs/Read.lean`).
+   `cutInLeaf`, `resolveFront`, `resolveBack` and `makeItems` mirror the
+   Rust arm for arm, with a position modelled as an index into `toList`
+   (the sibling chain lists the leaves in tree order, which the Rust
+   checker verifies at every replay check line; hopping to a neighbour
+   leaf is moving the index past the current leaf). `rangeTree_spec`
+   gives `range start stop = rangeSorted start stop toList` for every
+   bound combination including inverted ones, by turning positions into
+   counts of prefix predicates on the sorted list. The iterator itself is
+   modelled drained (the slice between the two positions), not as
+   `next` / `next_back` steps; the double-ended cursor bookkeeping is
+   what the replay's range queries exercise.
 4. ~~`remove` with the four repairs and root collapse~~ — DONE
    (`lean/BPlusTree/Proofs/Delete.lean`, about 1,650 lines).
    `removeTree_spec`: the removed pair was stored, `toList` becomes
@@ -236,8 +253,11 @@ In this order, because difficulty rises sharply:
    it on every push. Traces now mix inserts and removes (`I k v old`,
    `R k res`, return values checked too) and end with a drain to the
    empty tree, so every rebalance and root-collapse path in `delete.rs`
-   is compared against the model: about 150k ops and 30k checks in nine
-   seconds. Add `G k` when the model gains `get`.
+   is compared against the model: about 150k ops and 30k checks. Each
+   trace also carries `G k`, `F`, `L`, and `N start end` lines (get,
+   first, last, and range with random bounds), about 120k queries per
+   run, answered by the model's read functions; the whole replay takes
+   about sixteen seconds.
 2. Cite proofs from the code: a one-line comment at each Rust site that
    a lemma justifies (split arithmetic, merge fit, the depth bound).
 3. Add the uniform-depth check to `check_invariants_detailed` (cheap:

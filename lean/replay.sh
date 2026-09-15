@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
-# Generate insert traces from the Rust tree and replay them through the
-# Lean model, comparing a digest of the tree shape at every check line and
-# the full shape at the end. On a digest mismatch, rerun the generator to
+# Generate traces from the Rust tree and replay them through the Lean
+# model, comparing return values, a digest of the tree shape at every
+# check line, the read queries (get, first, last, range), and the full
+# shape at the end. On a digest mismatch, rerun the generator to
 # print the Rust shape at the failing operation next to the Lean one.
 # Run from anywhere; traces go to target/replay (or $1).
 set -euo pipefail
@@ -12,19 +13,21 @@ mkdir -p "$out"
 cargo build --release --example gen_trace
 gen=$(realpath target/release/examples/gen_trace)
 
-# seed leaf_cap branch_cap ops key_space check_every remove_pct drain
+# seed leaf_cap branch_cap ops key_space check_every query_every remove_pct drain
 # remove_pct 43 is the differential fuzz's 30 removes per 40 inserts;
-# drain 1 removes every remaining key afterwards, down to the empty tree.
+# drain 1 removes every remaining key afterwards, down to the empty tree;
+# query_every spaces the get/first/last/range lines (the model's reads
+# walk the whole entry list, so the large traces query less often).
 configs=(
-  "1 4 4 3000 200 1 0 1"
-  "2 4 8 3000 500 1 43 1"
-  "3 8 4 3000 500 1 43 1"
-  "4 5 5 3000 300 1 43 1"
-  "5 6 7 4000 1000 1 43 1"
-  "6 4 4 3000 20 1 43 1"
-  "7 4 4 6000 60 1 60 1"
-  "8 16 16 20000 50000 10 43 1"
-  "9 32 256 60000 1000000 100 43 1"
+  "1 4 4 3000 200 1 1 0 1"
+  "2 4 8 3000 500 1 1 43 1"
+  "3 8 4 3000 500 1 1 43 1"
+  "4 5 5 3000 300 1 1 43 1"
+  "5 6 7 4000 1000 1 1 43 1"
+  "6 4 4 3000 20 1 1 43 1"
+  "7 4 4 6000 60 1 1 60 1"
+  "8 16 16 20000 50000 10 10 43 1"
+  "9 32 256 60000 1000000 100 100 43 1"
 )
 declare -A args_of
 traces=()

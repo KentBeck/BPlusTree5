@@ -13,6 +13,8 @@ mod iterate;
 mod layout;
 mod node_alloc;
 
+#[cfg(feature = "compat_test_api")]
+pub use common::ShapeHasher;
 #[cfg(feature = "delete_profile")]
 pub use delete::DeleteProfile;
 pub use iterate::{Items, Keys, Values};

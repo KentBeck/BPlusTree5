@@ -14,11 +14,16 @@ Trace format (one op or check per line):
     CAPS <leaf_cap> <branch_cap>
     I <key> <value> <old value or ->
     R <key> <removed value or ->
+    G <key> <value or ->
+    F <key:value or ->
+    L <key:value or ->
+    N <start> <end> <count> <fnv1a-64 of the items rendered as a leaf>
     # <fnv1a-64 of the shape, 16 hex digits>
     = <shape>
 
 The value fields are what the Rust call returned; the model's return
-value must agree.
+value must agree. A range bound is `u` (unbounded), `i<k>` (included)
+or `e<k>` (excluded).
 
 Shapes: a leaf is `(k:v k:v ...)`, a branch is `[child sep child ...]`.
 Digest lines are the cheap, frequent check; a full shape line normally
@@ -49,10 +54,20 @@ def optStr : Option Int → String
   | some v => toString v
   | none => "-"
 
+def pairStr : Option (Int × Int) → String
+  | some (k, v) => s!"{k}:{v}"
+  | none => "-"
+
+def parseBound (s : String) : Bound Int :=
+  if s == "u" then .unbounded
+  else if s.startsWith "i" then .included (s.drop 1).toInt!
+  else .excluded (s.drop 1).toInt!
+
 structure Outcome where
   ok : Bool
   ops : Nat
   checks : Nat
+  queries : Nat
 
 def replayFile (path : System.FilePath) : IO Outcome := do
   let content ← IO.FS.readFile path
@@ -61,6 +76,7 @@ def replayFile (path : System.FilePath) : IO Outcome := do
   let mut bc := 0
   let mut ops := 0
   let mut checks := 0
+  let mut queries := 0
   let mut lineNo := 0
   for line in content.splitOn "\n" do
     lineNo := lineNo + 1
@@ -74,7 +90,7 @@ def replayFile (path : System.FilePath) : IO Outcome := do
       ops := ops + 1
       if optStr got != old then
         IO.eprintln s!"{path}:{lineNo}: insert {k} returned {optStr got} in the model, {old} in Rust"
-        return { ok := false, ops, checks }
+        return { ok := false, ops, checks, queries }
     | ["R", k, res] =>
       let got := removeTree lc bc root k.toInt!
       ops := ops + 1
@@ -83,11 +99,37 @@ def replayFile (path : System.FilePath) : IO Outcome := do
         root := root'
         if toString v != res then
           IO.eprintln s!"{path}:{lineNo}: remove {k} returned {v} in the model, {res} in Rust"
-          return { ok := false, ops, checks }
+          return { ok := false, ops, checks, queries }
       | none =>
         if res != "-" then
           IO.eprintln s!"{path}:{lineNo}: remove {k} found nothing in the model, {res} in Rust"
-          return { ok := false, ops, checks }
+          return { ok := false, ops, checks, queries }
+    | ["G", k, res] =>
+      let got := getTree root k.toInt!
+      queries := queries + 1
+      if optStr got != res then
+        IO.eprintln s!"{path}:{lineNo}: get {k} returned {optStr got} in the model, {res} in Rust"
+        return { ok := false, ops, checks, queries }
+    | ["F", res] =>
+      let got := firstTree root
+      queries := queries + 1
+      if pairStr got != res then
+        IO.eprintln s!"{path}:{lineNo}: first returned {pairStr got} in the model, {res} in Rust"
+        return { ok := false, ops, checks, queries }
+    | ["L", res] =>
+      let got := lastTree root
+      queries := queries + 1
+      if pairStr got != res then
+        IO.eprintln s!"{path}:{lineNo}: last returned {pairStr got} in the model, {res} in Rust"
+        return { ok := false, ops, checks, queries }
+    | ["N", sb, eb, n, expected] =>
+      let items := rangeTree root (parseBound sb) (parseBound eb)
+      let got := hex16 (fnv1a (shape (.leaf items)))
+      queries := queries + 1
+      if got != expected || toString items.length != n then
+        IO.eprintln s!"{path}:{lineNo}: range {sb} {eb} differs: model has {items.length} items, digest {got}; Rust has {n} items, digest {expected}"
+        IO.eprintln s!"  model items: {shape (.leaf items)}"
+        return { ok := false, ops, checks, queries }
     | ["#", expected] =>
       let got := hex16 (fnv1a (shape root))
       if got == expected then
@@ -95,7 +137,7 @@ def replayFile (path : System.FilePath) : IO Outcome := do
       else
         IO.eprintln s!"{path}:{lineNo}: shape digest mismatch after {ops} ops (rust {expected}, lean {got})"
         IO.eprintln s!"  lean shape: {shape root}"
-        return { ok := false, ops, checks }
+        return { ok := false, ops, checks, queries }
     | "=" :: rest =>
       let expected := " ".intercalate rest
       let got := shape root
@@ -105,12 +147,12 @@ def replayFile (path : System.FilePath) : IO Outcome := do
         IO.eprintln s!"{path}:{lineNo}: shape mismatch after {ops} ops"
         IO.eprintln s!"  rust: {expected}"
         IO.eprintln s!"  lean: {got}"
-        return { ok := false, ops, checks }
+        return { ok := false, ops, checks, queries }
     | [""] => pure ()
     | _ =>
       IO.eprintln s!"{path}:{lineNo}: unparsed line: {line}"
-      return { ok := false, ops, checks }
-  return { ok := true, ops, checks }
+      return { ok := false, ops, checks, queries }
+  return { ok := true, ops, checks, queries }
 
 def main (args : List String) : IO UInt32 := do
   if args.isEmpty then
@@ -120,7 +162,7 @@ def main (args : List String) : IO UInt32 := do
   for path in args do
     let r ← replayFile path
     if r.ok then
-      IO.println s!"{path}: OK ({r.ops} ops, {r.checks} checks)"
+      IO.println s!"{path}: OK ({r.ops} ops, {r.checks} checks, {r.queries} queries)"
     else
       failed := true
   return if failed then 1 else 0
