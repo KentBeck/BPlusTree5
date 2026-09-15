@@ -7,3 +7,4 @@ import BPlusTree.Proofs.Leaf
 import BPlusTree.Proofs.Spec
 import BPlusTree.Proofs.Branch
 import BPlusTree.Proofs.Tree
+import BPlusTree.Proofs.Delete

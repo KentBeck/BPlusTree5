@@ -20,6 +20,15 @@ def insertSorted (k : K) (v : V) : List (K × V) → List (K × V)
     else if k < e.1 then (k, v) :: e :: rest
     else (k, v) :: rest
 
+/-- Removal from a sorted association list: drop the entry with the key,
+if any. -/
+def eraseSorted (k : K) : List (K × V) → List (K × V)
+  | [] => []
+  | e :: rest =>
+    if e.1 < k then e :: eraseSorted k rest
+    else if k < e.1 then e :: rest
+    else rest
+
 end Spec
 
 end BPlusTree

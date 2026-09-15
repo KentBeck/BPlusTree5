@@ -31,9 +31,7 @@ push. FNV rather than a cryptographic hash because neither side is
 adversarial and both implementations are ten lines that can be compared
 by eye.
 
-The replay is the only check on the delete model so far: its theorems
-are not written yet, so shape equality across these traces is what
-currently ties `removeTree` to `delete.rs`.
+The delete model is both replayed and proved (`Proofs/Delete.lean`).
 
 A shape match is stronger than the differential fuzz's map comparison:
 it checks the same splits, the same separators, and the same leaf
@@ -71,15 +69,16 @@ link a reviewer checks by eye.
 | `dump_shape` / `shape_hash` (test-only, `compat_test_api`) | `shape` / `fnv1a` (`Replay/Main.lean`) | compared on every replayed trace |
 | the leaves' entries left to right (what `items()` yields) | `Node.toList` (`Model/Tree.lean`) | `insertTree_toList`: insert = `insertSorted` on it |
 | sorted-association-list insert (the spec) | `insertSorted` (`Model/Spec.lean`) | |
-| `keys[]` / `children[]` view of a branch | `Node.keysOf`, `Node.childrenOf`, `mkBranch` (`Model/Delete.lean`) | |
-| `leaf_remove` | `leafRemove` | replay |
-| `plan_rebalance`, `child_len` | `planRebalance`, `childLen` | replay |
-| `rotate_leaf_right` / `rotate_leaf_left` / `merge_leaf_pair` | same names | replay |
-| `rotate_branch_right` / `rotate_branch_left` / `merge_branch_pair` | same names | replay |
-| `rebalance_leaf_child` / `rebalance_branch_child` / `fix_branch_child` | same names | replay |
-| `remove_rec` | `removeRec` | replay |
-| `consolidate_root_children` + `absorb_root_child` | `consolidateRootChildren` | replay |
-| `check_root_collapse`, `remove` | `checkRootCollapse`, `removeTree` | replay |
+| `keys[]` / `children[]` view of a branch | `Node.keysOf`, `Node.childrenOf`, `mkBranch` (`Model/Delete.lean`); `ChainA` (`Proofs/Delete.lean`) | `chain_iff_chainA`, `shape_of_arrays` |
+| `leaf_remove` | `leafRemove` | `leafRemove_spec` |
+| `plan_rebalance`, `child_len` | `planRebalance`, `childLen` | `planRebalance_spec`: what each choice knew |
+| `rotate_leaf_right` / `rotate_leaf_left` / `merge_leaf_pair` | same names | `*_window`: repaired window well-formed, keys ordered, contents kept |
+| `rotate_branch_right` / `rotate_branch_left` / `merge_branch_pair` | same names | `*_window`, likewise |
+| `rebalance_leaf_child` / `rebalance_branch_child` / `fix_branch_child` | same names | `fixBranchChild_spec` |
+| `remove_rec` | `removeRec` | `removeRec_spec` |
+| `consolidate_root_children` + `absorb_root_child` | `consolidateRootChildren` | inside `removeTree_spec` |
+| `check_root_collapse`, `remove` | `checkRootCollapse`, `removeTree` | `removeTree_spec` |
+| sorted-association-list removal (the spec) | `eraseSorted` (`Model/Spec.lean`) | |
 
 What the two main theorems say, given a sorted leaf within capacity:
 
@@ -121,5 +120,30 @@ separators.
 previously stored under `k` (present iff some value is returned). With
 `insertTree_wf` this is the complete Phase 1 statement for insert.
 
+What the delete theorems say, for a well-formed tree with both
+capacities at least 4 (what `with_caps` enforces):
+
+- `removeTree_spec`: if the key is absent nothing is returned and no
+  entry has it; otherwise the returned value was stored under the key,
+  the new tree's `toList` is `eraseSorted k` of the old, and the new root
+  is well-formed at the same height or one lower.
+- `removeRec_spec`, the inductive core: below the root, a node that lost
+  an entry is `Shape` (well-formed except possibly one short of the
+  minimum), and the underflow flag it reports is exactly "below the
+  minimum".
+- `fixBranchChild_spec`: given the original well-formed chain and the
+  one-short child in its slot, `fix_branch_child` yields a shaped branch
+  with the same or one fewer key, an exact underflow flag below the root,
+  and the same entries. It dispatches on `planRebalance_spec` to six
+  window lemmas, one per rotation and merge on each node kind, each
+  stating that the repaired window is well-formed on both sides with the
+  separator strictly between its neighbours.
+
+The proofs settle the defensive arms in `delete.rs`: under `WF`,
+`fix_branch_child` never sees `len == 0` or a missing child, the
+`child_idx.min(len)` clamp is the identity, `plan_rebalance` never
+measures a missing sibling, and root collapse never meets an empty leaf
+child or ends with no survivor. Each is dead code that the Rust could
+drop.
+
 Not modelled here: `range`, `get`, node memory, and sibling pointers.
-Not yet proved: anything about `removeTree`.

@@ -116,6 +116,46 @@ theorem leafInsertOrSplit_split_eq {cap : Nat} {leaf l r : Leaf K V} {k : K} {v 
   · exact absurd h'.symm (habs e (by rw [hAB]; exact List.mem_append_right _ he))
   · exact absurd h' (hB e he)
 
+/-! ## `eraseSorted` -/
+
+theorem eraseIdx_window {α : Type} (cs1 : List α) (a : α) (cs2 : List α) :
+    (cs1 ++ a :: cs2).eraseIdx cs1.length = cs1 ++ cs2 := by
+  rw [List.eraseIdx_append_of_length_le (Nat.le_refl _), Nat.sub_self]; rfl
+
+theorem eraseSorted_append_left {k : K} (L M : List (K × V))
+    (hL : ∀ e ∈ L, e.1 < k) : eraseSorted k (L ++ M) = L ++ eraseSorted k M := by
+  induction L with
+  | nil => rfl
+  | cons e rest ih =>
+    have he : e.1 < k := hL e List.mem_cons_self
+    simp only [List.cons_append, eraseSorted, he, if_true]
+    rw [ih (fun x hx => hL x (List.mem_cons_of_mem _ hx))]
+
+theorem eraseSorted_append_right {k : K} (M R : List (K × V))
+    (hR : ∀ e ∈ R, k < e.1) : eraseSorted k (M ++ R) = eraseSorted k M ++ R := by
+  induction M with
+  | nil =>
+    cases R with
+    | nil => rfl
+    | cons e rest =>
+      have he : k < e.1 := hR e List.mem_cons_self
+      have hne : ¬ e.1 < k := fun h => lt_irrefl (lt_trans h he)
+      simp [eraseSorted, hne, he]
+  | cons e rest ih =>
+    simp only [List.cons_append, eraseSorted]
+    split
+    · rw [ih, List.cons_append]
+    · split <;> rfl
+
+/-- Present key: the entry at the cut is dropped. -/
+theorem eraseSorted_present {k : K} (A : List (K × V)) (e : K × V) (B : List (K × V))
+    (hA : ∀ a ∈ A, a.1 < k) (he : e.1 = k) :
+    eraseSorted k (A ++ e :: B) = A ++ B := by
+  rw [eraseSorted_append_left A _ hA]
+  have h1 : ¬ e.1 < k := by rw [he]; exact lt_irrefl
+  have h2 : ¬ k < e.1 := by rw [he]; exact lt_irrefl
+  simp [eraseSorted, h1, h2]
+
 end Spec
 
 end BPlusTree

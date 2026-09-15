@@ -42,7 +42,7 @@ obtained by `toList`. Every public operation gets a theorem against it:
 | Rust | Spec theorem |
 |---|---|
 | `insert k v` | ~~`toList (insert k v t) = insertSorted k v (toList t)`; returns the old value at `k`~~ — DONE |
-| `remove k` | `toList (remove k t) = (toList t).filter (·.1 ≠ k)`; returns the value at `k` |
+| `remove k` | ~~`toList (remove k t) = eraseSorted k (toList t)`; returns the value at `k`~~ — DONE |
 | `get k` | `get k t = (toList t).lookup k` |
 | `range lo hi` | `(range lo hi t).toList = (toList t).filter (inBounds lo hi)`, including excluded and inverted bounds |
 | `first` / `last` | head and last of `toList` |
@@ -99,8 +99,8 @@ than the code until the code has been refactored to match.
 `insertTree`) and define `Node.toList`. `Model/Delete.lean` ports
 `delete.rs` in full (`leafRemove`, `planRebalance`, the two leaf and two
 branch rotations, the two merges, `fixBranchChild`, `removeRec`,
-`consolidateRootChildren`, `checkRootCollapse`, `removeTree`), checked
-only by the replay so far. Range and get are not started.
+`consolidateRootChildren`, `checkRootCollapse`, `removeTree`), replayed
+and proved. Range and get are not started.
 
 ## Phase 2b — the heap model (memory safety)
 
@@ -210,16 +210,17 @@ In this order, because difficulty rises sharply:
    hop to the next/previous leaf when the cut sits at an edge, and the
    inverted-bounds check in `make_items`. Double-ended iteration:
    `next` and `next_back` together enumerate exactly the filtered list.
-4. `remove` with the four repairs and root collapse. Key lemmas:
-   - underflow means exactly `min - 1` (a child at `≥ min` loses one);
-   - borrow: donor at `> min` stays `≥ min` after giving one, receiver
-     reaches `min`;
-   - leaf merge: `(min - 1) + min ≤ cap`;
-   - branch merge: `(min - 1) + 1 + min ≤ cap` (tight for even `cap`);
-   - a merge removes one parent entry, so the parent underflows iff it
-     was at `min`, which is what `fix_branch_child` reports;
-   - `check_root_collapse` with `len ≤ 2` after a removal yields a WF
-     tree with the same `toList`.
+4. ~~`remove` with the four repairs and root collapse~~ — DONE
+   (`lean/BPlusTree/Proofs/Delete.lean`, about 1,650 lines).
+   `removeTree_spec`: the removed pair was stored, `toList` becomes
+   `eraseSorted k` of the old, and the root stays well-formed at the same
+   height or one lower. The listed lemmas are all there: the deficit is
+   exactly one (`Shape` plus the length facts in `removeRec_spec`), each
+   borrow and merge is a window lemma with the fill arithmetic, a merge
+   drops one parent key and the flag is exact below the root
+   (`fixBranchChild_spec`), and root collapse is handled case by case.
+   Proved in the array view `delete.rs` uses (`ChainA`), with window
+   lemmas to swap two adjacent children in a chain.
 
 ## Phase 5 — tie it back to the Rust
 
@@ -253,13 +254,13 @@ a decision on; each is either a theorem or a code change.
    branches hold `≥ 2` keys, so leaf count grows as `3^(depth - 2)`, and
    `depth t ≤ log₃ (leafCount t) + 2` bounds the recursion depth of both
    `insert_rec` and `remove_rec`.
-2. **Defensive paths with unclear reachability.** `fix_branch_child`
-   clamps `child_idx` to `len` and tolerates a null child;
-   `plan_rebalance` and `child_len` treat a null sibling as length 0;
-   `absorb_root_child` handles an empty leaf under a branch root. My
-   reading is that no live tree reaches these states. The model must
-   either prove that and the Rust deletes the branches, or admit the
-   states into `WF`. Either outcome improves the code.
+2. **Defensive paths with unclear reachability** — SETTLED by the delete
+   proofs: under `WF`, `fix_branch_child` never sees `len == 0` or a
+   missing child and its `child_idx.min(len)` clamp is the identity;
+   `plan_rebalance` never measures a missing sibling; root collapse never
+   meets an empty leaf child or ends with no survivor. The model kept
+   these arms so the proofs could speak to them; the Rust can now delete
+   them as a separate cleanup.
 3. **The runtime checker never verifies uniform leaf depth.** The model
    proves it; adding the check to the Rust validator is Phase 5.3.
 4. **`min_branch_len`'s `cap <= 2` arm is dead** since `with_caps`
@@ -304,16 +305,17 @@ lean/
   BPlusTree/Model/Branch.lean   -- branch half, root growth (done)
   BPlusTree/Model/Spec.lean     -- insertSorted, the abstract spec (done)
   BPlusTree/Model/Tree.lean     -- Node, toList, insertRec, insertTree (done)
-  BPlusTree/Model/Delete.lean   -- delete.rs, node by node (done; unproved)
+  BPlusTree/Model/Delete.lean   -- delete.rs, node by node (done)
   BPlusTree/Model/Heap.lean     -- Phase 2b
   BPlusTree/Proofs/Leaf.lean    -- leaf split and insert theorems (done)
   BPlusTree/Proofs/Branch.lean  -- branch split, apply-split, root growth (done)
   BPlusTree/Proofs/Spec.lean    -- insertSorted lemmas, leaf equations (done)
   BPlusTree/Proofs/Tree.lean    -- WF, chains, insert preserves WF and
                                 --   refines insertSorted (done)
+  BPlusTree/Proofs/Delete.lean  -- array-view chains, window repairs,
+                                --   fixBranchChild, removeRec, removeTree (done)
   BPlusTree/Proofs/WF.lean      -- checker equivalence
   BPlusTree/Proofs/Range.lean   -- Phase 4.3
-  BPlusTree/Proofs/Remove.lean  -- Phase 4.4
   BPlusTree/Proofs/Depth.lean   -- finding 1
   BPlusTree/Proofs/Heap.lean    -- Phase 2b theorems
   Replay/Main.lean, replay.sh   -- Phase 5.1 shape replay (done)
