@@ -19,6 +19,8 @@ impl<K: Ord + Clone, V> BPlusTreeMap<K, V> {
     /// tree stays well-formed, its entries become `insertSorted k v` of the
     /// old ones, and the returned value is the one stored under `key`;
     /// `Map.insert_wf` (`Proofs/Check.lean`) carries `entry_count` along.
+    /// On the heap model, `insertH_sim` (`Proofs/Heap.lean`): no fault, the
+    /// store holds exactly the reachable nodes, the sibling chain intact.
     pub fn insert(&mut self, key: K, value: V) -> Option<V> {
         let old_value = self.insert_inner(key, value);
         if old_value.is_none() {
@@ -56,7 +58,8 @@ impl<K: Ord + Clone, V> BPlusTreeMap<K, V> {
     /// entry count (non-root branches hold at least two keys), so the
     /// recursion is shallow.
     /// Lean: `insertRec_wf` and `insertRec_toList` (`Proofs/Tree.lean`), with
-    /// `front_lt_of_route` for the descent through `child_for_key`.
+    /// `front_lt_of_route` for the descent through `child_for_key`;
+    /// `insertRecH_sim` (`Proofs/Heap.lean`) is the same recursion on the heap.
     unsafe fn insert_rec(&mut self, node: NonNull<u8>, key: K, value: V) -> InsertResult<K, V> {
         let hdr = &*(node.as_ptr() as *const NodeHdr);
         match hdr.tag {

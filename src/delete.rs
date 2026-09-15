@@ -52,6 +52,8 @@ impl<K: Ord + Clone, V> BPlusTreeMap<K, V> {
     /// stored under `key`, the entries become `eraseSorted key` of the old
     /// ones, and the tree stays well-formed at the same height or one lower;
     /// `Map.remove_wf` (`Proofs/Check.lean`) carries `entry_count` along.
+    /// On the heap model, `removeH_sim` (`Proofs/HeapRemove.lean`): no fault,
+    /// no double free, no leaked node, the sibling chain intact.
     pub fn remove(&mut self, key: &K) -> Option<V> {
         let root = self.root?;
         let mut root_underflowed = false;
@@ -79,6 +81,8 @@ impl<K: Ord + Clone, V> BPlusTreeMap<K, V> {
     /// Children are never null and a non-root leaf is never empty (see
     /// `removeTree_spec` in `lean/BPlusTree/Proofs/Delete.lean`), so there
     /// is nothing to skip or free on the way.
+    /// Lean: `checkRootCollapseH_sim` (`Proofs/HeapRemove.lean`) frees exactly
+    /// the old root (and the merged-away leaf) and keeps the rest.
     unsafe fn check_root_collapse(&mut self, root: NonNull<u8>) {
         let parts = layout::carve_branch::<K>(root, &self.branch_layout);
         let len = (*parts.hdr).len as usize;
@@ -239,6 +243,9 @@ impl<K: Ord + Clone, V> BPlusTreeMap<K, V> {
     /// A branch holds at least one separator and `child_idx` addresses one
     /// of its `len + 1` children (`fixBranchChild_spec` in
     /// `lean/BPlusTree/Proofs/Delete.lean`).
+    /// Lean: `fixBranchChildH_sim` (`Proofs/HeapRemove.lean`): on the heap
+    /// model the repair never faults, returns the same verdict, and touches
+    /// only the two siblings, this branch, and the successor leaf's `prev`.
     unsafe fn fix_branch_child(&mut self, branch: NonNull<u8>, child_idx: usize) -> bool {
         let parts = layout::carve_branch::<K>(branch, &self.branch_layout);
         let len = (*parts.hdr).len as usize;
@@ -350,7 +357,8 @@ impl<K: Ord + Clone, V> BPlusTreeMap<K, V> {
     /// travels with it. A pass-through: contrast the leaf rotations, which
     /// re-derive the separator from data.
     /// Lean: `rotateBranchRight_window` (`Proofs/Delete.lean`): both children
-    /// well-formed afterwards, the new separator strictly between them.
+    /// well-formed afterwards, the new separator strictly between them;
+    /// `rotateBranchRightH_sim` (`Proofs/HeapRemove.lean`) for the records.
     unsafe fn rotate_branch_right(&mut self, branch: NonNull<u8>, sep_idx: usize) {
         #[cfg(feature = "delete_profile")]
         {
@@ -391,7 +399,7 @@ impl<K: Ord + Clone, V> BPlusTreeMap<K, V> {
     /// Mirror of `rotate_branch_right`: the right child's first key moves up,
     /// the old separator moves down as the left child's last key, and the
     /// right child's first subtree travels with it.
-    /// Lean: `rotateBranchLeft_window`.
+    /// Lean: `rotateBranchLeft_window`; `rotateBranchLeftH_sim` on the heap.
     unsafe fn rotate_branch_left(&mut self, branch: NonNull<u8>, sep_idx: usize) {
         #[cfg(feature = "delete_profile")]
         {
@@ -433,7 +441,8 @@ impl<K: Ord + Clone, V> BPlusTreeMap<K, V> {
     /// Merge the two children flanking separator `left_idx`:
     /// `children[left_idx]` absorbs `children[left_idx + 1]`, and the
     /// separator (returned by `remove_branch_entry`) moves down between them.
-    /// Lean: `mergeBranchPair_window`.
+    /// Lean: `mergeBranchPair_window`; `mergeBranchPairH_sim` on the heap
+    /// (the right child is freed, nothing else is).
     unsafe fn merge_branch_pair(&mut self, branch: NonNull<u8>, left_idx: usize) {
         let parts = layout::carve_branch::<K>(branch, &self.branch_layout);
         let children = parts.children_ptr as *mut *mut u8;
@@ -477,7 +486,8 @@ impl<K: Ord + Clone, V> BPlusTreeMap<K, V> {
     /// child's last item becomes the right child's first. Leaves re-derive
     /// the separator from the right child's new first key (contrast the
     /// branch rotations, which pass the separator through).
-    /// Lean: `rotateLeafRight_window` (`Proofs/Delete.lean`).
+    /// Lean: `rotateLeafRight_window` (`Proofs/Delete.lean`);
+    /// `rotateLeafRightH_sim` (`Proofs/HeapRemove.lean`) on the heap.
     unsafe fn rotate_leaf_right(&mut self, branch: NonNull<u8>, sep_idx: usize) {
         #[cfg(feature = "delete_profile")]
         {
@@ -516,7 +526,7 @@ impl<K: Ord + Clone, V> BPlusTreeMap<K, V> {
     /// Mirror of `rotate_leaf_right`: the right child's first item becomes
     /// the left child's last, and the separator is re-derived from the right
     /// child's new first key.
-    /// Lean: `rotateLeafLeft_window`.
+    /// Lean: `rotateLeafLeft_window`; `rotateLeafLeftH_sim` on the heap.
     unsafe fn rotate_leaf_left(&mut self, branch: NonNull<u8>, sep_idx: usize) {
         #[cfg(feature = "delete_profile")]
         {
@@ -555,7 +565,8 @@ impl<K: Ord + Clone, V> BPlusTreeMap<K, V> {
     /// Merge the two children flanking separator `left_idx`:
     /// `children[left_idx]` absorbs `children[left_idx + 1]`. Leaf keys carry
     /// their own ordering, so the separator is redundant and dropped.
-    /// Lean: `mergeLeafPair_window`.
+    /// Lean: `mergeLeafPair_window`; `mergeLeafPairH_sim` on the heap (the
+    /// right leaf is unlinked and freed, its successor's `prev` moves).
     unsafe fn merge_leaf_pair(&mut self, branch: NonNull<u8>, left_idx: usize) {
         let parts = layout::carve_branch::<K>(branch, &self.branch_layout);
         let children = parts.children_ptr as *mut *mut u8;
@@ -588,6 +599,9 @@ impl<K: Ord + Clone, V> BPlusTreeMap<K, V> {
     /// underfull and therefore needs repair by its parent.
     /// Lean: `removeRec_spec` (`Proofs/Delete.lean`): below the root the node
     /// is at most one short of minimum fill, and the flag is exact.
+    /// `removeRecH_sim` (`Proofs/HeapRemove.lean`) is the same recursion on
+    /// the heap model: ids only shrink, freed ids are exactly the dropped
+    /// ones, and nothing outside the subtree changes.
     unsafe fn remove_rec(
         &mut self,
         node: NonNull<u8>,

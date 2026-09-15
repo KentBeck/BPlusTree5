@@ -2538,6 +2538,339 @@ theorem removeRecH_sim (lc bc : Nat) (hlc : 4 ≤ lc) (hbc : 4 ≤ bc) (k : K) :
         · exact subPost_trans hsubsetMid hdropMid hheadMid hfrMid hfr' hallocLt hnextOut
             hpostFix.toSubPost
 
+/-! ## Root collapse and `remove` -/
+
+theorem toList_checkRootCollapse (lc : Nat) (r : Node K V) :
+    (checkRootCollapse lc r).toList = r.toList := by
+  unfold checkRootCollapse
+  split
+  · simp [Node.toList, entriesToList]
+  · split <;> simp [Node.toList, entriesToList]
+  · rfl
+
+theorem checkRootCollapse_two_other (lc : Nat) (t0 : Node K V) (s : K) (tc1 : Node K V)
+    (h : ¬ ∃ L R, t0 = .leaf L ∧ tc1 = .leaf R) :
+    checkRootCollapse lc (.branch t0 [(s, tc1)]) = .branch t0 [(s, tc1)] := by
+  cases t0 with
+  | leaf L =>
+    cases tc1 with
+    | leaf R => exact absurd ⟨L, R, rfl, rfl⟩ h
+    | branch _ _ => rfl
+  | branch _ _ => cases tc1 <;> rfl
+
+/-- After a remove the store holds exactly the ids the subtree still reaches. -/
+theorem domain_after_remove {h h' : Heap K V} {ids ids' : List NodeId}
+    (hdom : ∀ i, (h.get i).isSome ↔ i ∈ ids) (hsubset : ∀ i ∈ ids', i ∈ ids)
+    (hdrop : ∀ i ∈ ids, i ∉ ids' → h'.get i = none)
+    (hfr : ∀ i, i ∉ ids → i < h.fresh → h'.get i = h.get i) (hb' : Heap.Bounded h')
+    (hfresh : h'.fresh = h.fresh) (halloc' : ∀ i ∈ ids', (h'.get i).isSome) :
+    ∀ i, (h'.get i).isSome ↔ i ∈ ids' := by
+  intro i
+  refine ⟨fun hi => ?_, halloc' i⟩
+  by_cases hni : i ∈ ids'
+  · exact hni
+  exfalso
+  by_cases hin : i ∈ ids
+  · rw [hdrop i hin hni] at hi; cases hi
+  · by_cases hlt : i < h.fresh
+    · rw [hfr i hin hlt] at hi
+      exact hin ((hdom i).mp hi)
+    · have := hb' i hi
+      rw [hfresh] at this
+      exact hlt this
+
+/-- `replace_root`: the old root is freed, a leaf survivor's `prev` is
+cleared, nothing else changes. -/
+theorem replaceRootH_spec {h : Heap K V} {root c0 : NodeId} {es : List (K × NodeId)}
+    (hg : h.get root = some (.branch c0 es)) (hc : (h.get c0).isSome) (hne : c0 ≠ root) :
+    ∃ h', replaceRootH h root c0 = some (c0, h') ∧ h'.get root = none ∧
+      (∀ kvs p n, h.get c0 = some (.leaf kvs p n) → h'.get c0 = some (.leaf kvs none n)) ∧
+      (∀ cc0 ces, h.get c0 = some (.branch cc0 ces) → h'.get c0 = some (.branch cc0 ces)) ∧
+      (∀ i, i ≠ root → i ≠ c0 → h'.get i = h.get i) ∧ h'.fresh = h.fresh := by
+  obtain ⟨h1, he, hg1, ho1, hf1⟩ := emptyBranch_spec hg
+  simp only [replaceRootH, he, Option.bind_eq_bind, Option.bind_some]
+  have hc1 : h1.get c0 = h.get c0 := ho1 c0 hne
+  rcases hgc : h.get c0 with _ | (⟨kvs, p, n⟩ | ⟨cc0, ces⟩)
+  · simp [hgc] at hc
+  · rw [hc1, hgc]
+    simp only
+    obtain ⟨h2, hs, hg2, ho2, hf2⟩ := Heap.setPrev_spec (h := h1) (by rw [hc1]; exact hgc) none
+    rw [hs]; simp only [Option.bind_some]
+    have hgr2 : h2.get root = some (.branch c0 []) := by rw [ho2 root (Ne.symm hne)]; exact hg1
+    obtain ⟨h3, hf, hg3, ho3, hf3⟩ := freeEmptiedBranch_spec hgr2
+    rw [hf]; simp only [Option.bind_some]
+    refine ⟨h3, rfl, hg3, ?_, ?_, ?_, by rw [hf3, hf2, hf1]⟩
+    · intro kvs' p' n' hgc'
+      cases hgc'
+      rw [ho3 c0 hne]; exact hg2
+    · intro cc0 ces hgc'; cases hgc'
+    · intro i hir hic
+      rw [ho3 i hir, ho2 i hic, ho1 i hir]
+  · rw [hc1, hgc]
+    simp only [Option.bind_some]
+    obtain ⟨h3, hf, hg3, ho3, hf3⟩ := freeEmptiedBranch_spec hg1
+    rw [hf]; simp only [Option.bind_some]
+    refine ⟨h3, rfl, hg3, ?_, ?_, ?_, by rw [hf3, hf1]⟩
+    · intro kvs' p' n' hgc'; cases hgc'
+    · intro cc0' ces' hgc'
+      cases hgc'
+      rw [ho3 c0 hne, hc1, hgc]
+    · intro i hir hic
+      rw [ho3 i hir, ho1 i hir]
+
+/-- `check_root_collapse` on the heap, for a root branch with at most one
+separator: no fault, and the tree model's new root with the heap
+invariant's structural parts. -/
+theorem checkRootCollapseH_sim (lc : Nat) {d : Nat} {h : Heap K V} {root c0 : NodeId}
+    {es : List (K × NodeId)} {t : Node K V} {ids lv : List NodeId}
+    (hg : h.get root = some (.branch c0 es)) (hsub : Sub h (d + 2) root t ids lv)
+    (hnd : ids.Nodup) (hb : Heap.Bounded h) (hdom : ∀ i, (h.get i).isSome ↔ i ∈ ids)
+    (hchain : Linked h none lv none) (hle : es.length ≤ 1) :
+    ∃ r' h', checkRootCollapseH lc h root = some (r', h') ∧
+      ∃ d' ids' lv', Sub h' (d' + 1) r' (checkRootCollapse lc t) ids' lv' ∧ ids'.Nodup ∧
+        Heap.Bounded h' ∧ (∀ i, (h'.get i).isSome ↔ i ∈ ids') ∧ Linked h' none lv' none := by
+  obtain ⟨t0, ts, below, h0, hes, rfl, hbelow, rfl, hlvb⟩ := sub_branch_inv hg hsub
+  have halloc : ∀ i ∈ root :: below, (h.get i).isSome :=
+    mem_reachIds_allocated (d + 2) h root _ hsub.reach
+  obtain ⟨hrootnb, hndb⟩ := List.nodup_cons.mp hnd
+  simp only [checkRootCollapseH, Heap.getBranch_eq hg, Option.bind_eq_bind, Option.bind_some]
+  rcases es with _ | ⟨⟨s, c1⟩, rest⟩
+  · -- one child: it becomes the root
+    simp only [absNode.absEntries, Option.some.injEq] at hes
+    subst hes
+    simp only [List.map_nil] at hbelow hlvb
+    have hL0 := reachChildren_singleton hbelow
+    have hlv0 := leafChildren_singleton hlvb
+    have hc0mem : c0 ∈ below := mem_reachIds_self hL0
+    have hc0ne : c0 ≠ root := fun heq => hrootnb (heq ▸ hc0mem)
+    obtain ⟨h', hrun, hgr', hleaf', hbranch', hother', hfr'⟩ :=
+      replaceRootH_spec hg (halloc c0 (List.mem_cons_of_mem _ hc0mem)) hc0ne
+    have hsame : ∀ i ∈ below, SameContent (h.get i) (h'.get i) := by
+      intro i hi
+      have hir : i ≠ root := fun heq => hrootnb (heq ▸ hi)
+      by_cases hic : i = c0
+      · subst hic
+        rcases hgc : h.get i with _ | (⟨kvs, p, n⟩ | ⟨cc0, ces⟩)
+        · have := halloc i (List.mem_cons_of_mem _ hi); simp [hgc] at this
+        · rw [hleaf' kvs p n hgc]; exact sameContent_leaf
+        · rw [hbranch' cc0 ces hgc]; exact sameContent_refl _
+      · exact sameContent_of_eq (hother' i hir hic)
+    obtain ⟨hL0', habs', hlv'⟩ := walks_congr (d + 1) h h' c0 below hL0 hsame
+    refine ⟨c0, h', hrun, d, below, lv, ⟨by rw [habs', checkRootCollapse_one]; exact h0, hL0',
+      by rw [hlv']; exact hlv0⟩, hndb, ?_, ?_, ?_⟩
+    · refine bounded_of_subset hb hfr' (fun i hi => ?_)
+      by_cases hir : i = root
+      · subst hir; rw [hgr'] at hi; cases hi
+      by_cases hic : i = c0
+      · subst hic; exact halloc i (List.mem_cons_of_mem _ hc0mem)
+      · rw [hother' i hir hic] at hi; exact hi
+    · intro i
+      by_cases hir : i = root
+      · subst hir; simp [hgr', hrootnb]
+      by_cases hic : i = c0
+      · subst hic
+        refine ⟨fun _ => hc0mem, fun _ => ?_⟩
+        rcases hgc : h.get i with _ | (⟨kvs, p, n⟩ | ⟨cc0, ces⟩)
+        · have := halloc i (List.mem_cons_of_mem _ hc0mem); simp [hgc] at this
+        · simp [hleaf' kvs p n hgc]
+        · simp [hbranch' cc0 ces hgc]
+      · rw [hother' i hir hic, hdom i]
+        simp [hir]
+    · -- the chain
+      rcases hgc : h.get c0 with _ | (⟨kvs, p, n⟩ | ⟨cc0, ces⟩)
+      · have := halloc c0 (List.mem_cons_of_mem _ hc0mem); simp [hgc] at this
+      · rw [leafIds_leaf hgc] at hlv0
+        cases hlv0
+        obtain ⟨kvs', hgc'⟩ := linked_singleton.mp hchain
+        rw [hgc] at hgc'
+        cases hgc'
+        exact linked_singleton.mpr ⟨kvs, hleaf' kvs none none hgc⟩
+      · refine linked_congr (fun i hi => ?_) hchain
+        obtain ⟨kvs, p, n, hgi⟩ := linked_mem_leaf hchain hi
+        have hir : i ≠ root := fun heq => by subst heq; rw [hg] at hgi; cases hgi
+        have hic : i ≠ c0 := fun heq => by subst heq; rw [hgc] at hgi; cases hgi
+        exact hother' i hir hic
+  · rcases rest with _ | ⟨_, _⟩
+    · -- two children
+      obtain ⟨tc1, tr, hc1, hr, rfl⟩ := absEntries_cons_inv hes
+      simp only [absNode.absEntries, Option.some.injEq] at hr
+      subst hr
+      simp only [List.map_cons, List.map_nil] at hbelow hlvb
+      obtain ⟨L0, L1, hL0, hL1, rfl⟩ := reachChildren_split (l1 := [c0]) (l2 := [c1]) hbelow
+      obtain ⟨lv0, lv1, hlv0, hlv1, rfl⟩ := leafChildren_split (l1 := [c0]) (l2 := [c1]) hlvb
+      have hL0' := reachChildren_singleton hL0
+      have hL1' := reachChildren_singleton hL1
+      have hlv0' := leafChildren_singleton hlv0
+      have hlv1' := leafChildren_singleton hlv1
+      have hc0mem : c0 ∈ L0 ++ L1 := List.mem_append_left _ (mem_reachIds_self hL0')
+      have hc1mem : c1 ∈ L0 ++ L1 := List.mem_append_right _ (mem_reachIds_self hL1')
+      have hc0ne : c0 ≠ root := fun heq => hrootnb (heq ▸ hc0mem)
+      have hc1ne : c1 ≠ root := fun heq => hrootnb (heq ▸ hc1mem)
+      have hc01 : c0 ≠ c1 := fun heq => by
+        rw [nodup_append_iff] at hndb
+        exact hndb.2.2 c0 (mem_reachIds_self hL0') c1 (mem_reachIds_self hL1') heq
+      have hc0some := halloc c0 (List.mem_cons_of_mem _ hc0mem)
+      have hc1some := halloc c1 (List.mem_cons_of_mem _ hc1mem)
+      -- the unchanged outcome
+      have hstay : ∃ d' ids' lv', Sub h (d' + 1) root (.branch t0 [(s, tc1)]) ids' lv' ∧
+          ids'.Nodup ∧ Heap.Bounded h ∧ (∀ i, (h.get i).isSome ↔ i ∈ ids') ∧
+          Linked h none lv' none :=
+        ⟨d + 1, _, _, hsub, hnd, hb, hdom, hchain⟩
+      rcases hgc0 : h.get c0 with _ | (⟨T, p0, n0⟩ | ⟨cc0, ces⟩) <;>
+        rcases hgc1 : h.get c1 with _ | (⟨S, p1, n1⟩ | ⟨cc1, ces1⟩)
+      all_goals (try (simp [hgc0] at hc0some; done))
+      all_goals (try (simp [hgc1] at hc1some; done))
+      · -- two leaves
+        rw [absNode_leaf hgc0] at h0; cases h0
+        rw [absNode_leaf hgc1] at hc1; cases hc1
+        rw [leafIds_leaf hgc0] at hlv0'; cases hlv0'
+        rw [leafIds_leaf hgc1] at hlv1'; cases hlv1'
+        rw [reachIds_leaf hgc0] at hL0'; cases hL0'
+        rw [reachIds_leaf hgc1] at hL1'; cases hL1'
+        -- the links
+        have hlinks := hchain
+        simp only [List.singleton_append, Linked, List.head?_cons, List.head?_nil, Option.some_or,
+          Option.none_or, hgc0, hgc1, Option.some.injEq, NodeRec.leaf.injEq, true_and, and_true,
+          exists_eq_left', exists_and_left, exists_eq_left] at hlinks
+        obtain ⟨⟨rfl, rfl⟩, rfl, rfl⟩ := hlinks
+        simp only [tryMergeLeavesH, hgc0, hgc1, checkRootCollapse_leaves]
+        by_cases hfit : T.length + S.length ≤ lc
+        · rw [if_neg (by omega), if_pos hfit]
+          simp only [Option.bind_eq_bind, Option.bind_some]
+          obtain ⟨h1, hs1, hg1, ho1, hf1⟩ := Heap.setLeaf_spec hgc0 (T ++ S)
+          rw [hs1]; simp only [Option.bind_some]
+          have hgc1' : h1.get c1 = some (.leaf S (some c0) none) := by
+            rw [ho1 c1 (Ne.symm hc01)]; exact hgc1
+          obtain ⟨h2, hs2, hg2, ho2, hf2⟩ := Heap.setLeaf_spec hgc1' []
+          rw [hs2]; simp only [Option.bind_some]
+          have hgc0'' : h2.get c0 = some (.leaf (T ++ S) none (some c1)) := by
+            rw [ho2 c0 hc01]; exact hg1
+          obtain ⟨h3, hfl, hg3a, hg3b, -, ho3, hf3⟩ :=
+            freeEmptiedLeaf_spec hg2 hgc0'' hc01 (fun o ho => by cases ho)
+          rw [hfl]; simp only [Option.bind_some, if_true]
+          have hgr3 : h3.get root = some (.branch c0 [(s, c1)]) := by
+            rw [ho3 root (Ne.symm hc0ne) (Ne.symm hc1ne) (by simp), ho2 root (Ne.symm hc1ne),
+              ho1 root (Ne.symm hc0ne)]
+            exact hg
+          obtain ⟨h4, hrun, hgr4, hleaf4, -, ho4, hf4⟩ :=
+            replaceRootH_spec hgr3 (by simp [hg3a]) hc0ne
+          have hgc4 : h4.get c0 = some (.leaf (T ++ S) none none) := hleaf4 _ _ _ hg3a
+          have hother4 : ∀ i, i ≠ root → i ≠ c0 → i ≠ c1 → h4.get i = h.get i := by
+            intro i hir hic0 hic1
+            rw [ho4 i hir hic0, ho3 i hic0 hic1 (by simp), ho2 i hic1, ho1 i hic0]
+          have hgc1_4 : h4.get c1 = none := by rw [ho4 c1 hc1ne (Ne.symm hc01)]; exact hg3b
+          refine ⟨c0, h4, hrun, 0, [c0], [c0],
+            ⟨absNode_leaf hgc4 0, reachIds_leaf hgc4 0, leafIds_leaf hgc4 0⟩, by simp, ?_, ?_,
+            linked_singleton.mpr ⟨_, hgc4⟩⟩
+          · refine bounded_of_subset hb (by rw [hf4, hf3, hf2, hf1]) (fun i hi => ?_)
+            by_cases hir : i = root
+            · subst hir; rw [hgr4] at hi; cases hi
+            by_cases hic0 : i = c0
+            · subst hic0; exact hc0some
+            by_cases hic1 : i = c1
+            · subst hic1; rw [hgc1_4] at hi; cases hi
+            · rw [hother4 i hir hic0 hic1] at hi; exact hi
+          · intro i
+            by_cases hir : i = root
+            · subst hir; simp [hgr4, hc0ne.symm]
+            by_cases hic0 : i = c0
+            · subst hic0; simp [hgc4]
+            by_cases hic1 : i = c1
+            · subst hic1; simp [hgc1_4, hc01.symm]
+            · rw [hother4 i hir hic0 hic1, hdom i]
+              simp [hir, hic0, hic1]
+        · rw [if_pos (by omega), if_neg hfit]
+          simp only [Option.bind_eq_bind, Option.bind_some, Bool.false_eq_true, if_false]
+          exact ⟨root, h, rfl, hstay⟩
+      all_goals
+        -- not two leaves: nothing happens on either side
+        simp only [tryMergeLeavesH, hgc0, hgc1, Option.bind_eq_bind, Option.bind_some,
+          Bool.false_eq_true, if_false]
+        refine ⟨root, h, rfl, ?_⟩
+        rw [checkRootCollapse_two_other]
+        · exact hstay
+        · rintro ⟨L, R, hL, hR⟩
+          first
+            | (rw [hL] at h0; exact absurd h0 (by rw [absNode_branch hgc0]; cases absNode d h cc0 <;> simp; cases absNode.absEntries d h ces <;> simp))
+            | (rw [hR] at hc1; exact absurd hc1 (by rw [absNode_branch hgc1]; cases absNode d h cc1 <;> simp; cases absNode.absEntries d h ces1 <;> simp))
+    · simp at hle
+
+/-- `remove` on the heap model never faults, returns what the tree model
+returns, and keeps the heap invariant for the tree model's new tree. -/
+theorem removeH_sim (lc bc : Nat) (hlc : 4 ≤ lc) (hbc : 4 ≤ bc) (d fuel : Nat) (hfuel : d < fuel)
+    (m : HeapMap K V) (t : Node K V) (hinv : HeapInv m d t) (k : K) (ht : Nat)
+    (hwf : WF lc bc ht true none none t) :
+    ∃ res m', removeH lc bc fuel m k = some (res, m') ∧
+      (removeTree lc bc t k = none → res = none ∧ m' = m) ∧
+      (∀ v t', removeTree lc bc t k = some (v, t') → res = some v ∧ ∃ d', HeapInv m' d' t') := by
+  obtain ⟨root, ids, lv, hroot, hsub, hnd, hb, hdom, hchain, hcount⟩ := hinv
+  have hsorted := wf_toList_sorted lc bc ht t true none none hwf
+  have hk : InBounds (K := K) none none k :=
+    ⟨(fun _ hl => by cases hl), (fun _ hh => by cases hh)⟩
+  have hnext : NextOK m.heap ids lv none none := fun o ho => by cases ho
+  obtain ⟨res, h', hrec, hb', hfr', hpost⟩ :=
+    removeRecH_sim lc bc hlc hbc k d fuel m.heap root t ids lv none none ht true none none hfuel
+      hsub hnd hb hchain hnext hwf hk
+  have hspec := removeRec_spec lc bc hlc hbc k ht t true none none hwf hk
+  simp only [removeH, hroot, hrec, Option.bind_eq_bind, Option.bind_some]
+  rcases res with _ | ⟨v, under⟩
+  · simp only [RemovePost] at hpost
+    obtain ⟨hres, heq⟩ := hpost
+    subst heq
+    dsimp only
+    refine ⟨none, m, by rw [← hroot], fun _ => ⟨rfl, rfl⟩, fun v t' hrt => ?_⟩
+    rw [removeTree_eq_none hres] at hrt; cases hrt
+  · simp only [RemovePost] at hpost
+    obtain ⟨t', hres, ids', lv', hsub', hnd', hsubset, hdrop, -, hchain', hfr⟩ := hpost
+    simp only [hres] at hspec
+    obtain ⟨hmem, htl, -, -, -, -⟩ := hspec
+    have hcount' : m.count - 1 = t'.toList.length := by
+      rw [htl, hcount]
+      have := length_eraseSorted_present t.toList hsorted hmem
+      omega
+    have hdom' : ∀ i, (h'.get i).isSome ↔ i ∈ ids' :=
+      domain_after_remove hdom hsubset hdrop (fun i hi hlt => hfr.1 i hi (by simp) hlt) hb' hfr'
+        (mem_reachIds_allocated (d + 1) h' root ids' hsub'.reach)
+    have hstay : HeapInv ⟨h', some root, m.count - 1⟩ d t' :=
+      ⟨root, ids', lv', rfl, hsub', hnd', hb', hdom', hchain', hcount'⟩
+    dsimp only
+    rcases hgr : h'.get root with _ | (⟨kvs, p, n⟩ | ⟨c0, es⟩)
+    · exfalso; have := hsub'.reach; simp [reachIds, hgr] at this
+    · dsimp only
+      obtain ⟨rfl, -, -⟩ := sub_leaf_inv hgr hsub'
+      refine ⟨some v, ⟨h', some root, m.count - 1⟩, rfl, fun hrt => ?_, fun v' t'' hrt => ?_⟩
+      · rw [removeTree_eq_leaf hres] at hrt; cases hrt
+      · rw [removeTree_eq_leaf hres] at hrt
+        cases hrt
+        exact ⟨rfl, d, hstay⟩
+    · dsimp only
+      obtain ⟨d0, rfl⟩ : ∃ d0, d = d0 + 1 := by
+        cases d with
+        | zero => exact (sub_branch_zero hgr hsub').elim
+        | succ d0 => exact ⟨d0, rfl⟩
+      obtain ⟨t0, ts, below, h0, hes, rfl, hbelow, rfl, hlvb⟩ := sub_branch_inv hgr hsub'
+      have hlents : ts.length = es.length := absEntries_length hes
+      have htree := removeTree_eq_branch hres
+      by_cases hle : es.length ≤ 1
+      · rw [if_pos hle]
+        rw [if_pos (by rw [hlents]; exact hle)] at htree
+        obtain ⟨r', h'', hrun, d', ids'', lv'', hsub'', hnd'', hb'', hdom'', hchain''⟩ :=
+          checkRootCollapseH_sim lc hgr hsub' hnd' hb' hdom' hchain' hle
+        simp only [hrun, Option.bind_some]
+        refine ⟨some v, ⟨h'', some r', m.count - 1⟩, rfl, fun hrt => ?_, fun v' t'' hrt => ?_⟩
+        · rw [htree] at hrt; cases hrt
+        · rw [htree] at hrt
+          cases hrt
+          refine ⟨rfl, d', r', ids'', lv'', rfl, hsub'', hnd'', hb'', hdom'', hchain'', ?_⟩
+          rw [toList_checkRootCollapse]; exact hcount'
+      · rw [if_neg hle]
+        rw [if_neg (by rw [hlents]; exact hle)] at htree
+        refine ⟨some v, ⟨h', some root, m.count - 1⟩, rfl, fun hrt => ?_, fun v' t'' hrt => ?_⟩
+        · rw [htree] at hrt; cases hrt
+        · rw [htree] at hrt
+          cases hrt
+          exact ⟨rfl, d0 + 1, hstay⟩
+
 end HeapRemove
 
 end BPlusTree

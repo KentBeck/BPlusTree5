@@ -241,8 +241,31 @@ What is proved (`Proofs/Heap.lean`):
   this is no use after free, no double free, no node leak, and
   sibling-chain integrity.
 
-Not yet proved at this level: `remove` (modelled and replayed; its
-simulation is next), the reads, and the value-token accounting.
+What is proved for remove (`Proofs/HeapRemove.lean`, about 2,900 lines):
+
+- Record-level specs for the six repairs (`rotateLeafRightH_spec`, ...,
+  `mergeBranchPairH_spec`), `replaceRootH_spec`, and the chain lemmas
+  `linked_erase` / `linked_replace_prev` for unlinking a merged leaf.
+- `planRebalanceH_eq`: the heap's plan reads the lengths the tree model
+  computes, so it makes the same choice.
+- `window_reassemble` and the six `_sim` lemmas: after a repair the
+  branch is a well-defined subtree again whose ids are a subset of the
+  old ones (a merge frees exactly the absorbed sibling), the first leaf
+  is kept, the chain holds, and nothing outside the window changes but
+  the successor leaf's `prev`.
+- `fixBranchChildH_sim`: `fix_branch_child` never faults, returns the
+  tree model's underflow verdict, and delivers that post-state.
+- `removeRecH_sim`, by induction on height like the insert proof, with
+  `SubPost` (ids shrink, dropped ids are freed, first leaf kept, chain
+  intact, frame) composing across the recursive call and the repair.
+- `checkRootCollapseH_sim` and `removeH_sim`: `remove` never faults,
+  returns what `removeTree` returns, and re-establishes `HeapInv` (at
+  the same or a lower height) for the tree model's new tree. So for
+  remove too: no use after free, no double free (every freed id was
+  allocated and is never read again), no node leak (the store's domain
+  is exactly the reachable set), and sibling-chain integrity.
+
+Not yet proved at this level: the reads and the value-token accounting.
 
 Not modelled here: node memory itself, byte offsets, and aliasing, which
 stay with Miri.

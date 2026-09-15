@@ -175,10 +175,24 @@ and sibling-chain integrity (the doubly-linked chain is preserved,
 height with an explicit frame: below a subtree only its own ids and the
 successor leaf's `prev` change.
 
-Not yet proved at this level: `remove` (the model and the replay cover
-it; the simulation, through `fixBranchChildH` and the root collapse, is
-the next step), the reads, and the value-token accounting (no double
-drop of a `K` / `V`).
+Proved (`lean/BPlusTree/Proofs/HeapRemove.lean`, about 2,900 lines):
+`removeRecH_sim` and `removeH_sim`, the same shape for `remove`: given
+`HeapInv`, `remove` on the heap model never faults, returns what
+`removeTree` returns, and re-establishes `HeapInv` for the tree model's
+new tree (at the same or a lower height after a root collapse). The
+proof goes through record-level specs of the six repairs and the root
+collapse, `planRebalanceH_eq` (the heap's plan is the tree model's), a
+generic "window" reassembly lemma (two adjacent children rewritten or
+merged into one, the rest of the branch untouched), `fixBranchChildH_sim`,
+and an induction on height whose post-state says: ids only shrink, the
+dropped ids are exactly the freed ones, the first leaf is kept, the
+chain still holds, and outside the subtree only the successor leaf's
+`prev` changes. So for remove too: no use after free, no double free,
+no node leak, and sibling-chain integrity, including `unlink_leaf` and
+freeing the old root.
+
+Not yet proved at this level: the reads, and the value-token accounting
+(no double drop of a `K` / `V`).
 Verifying the Rust source itself for memory safety would be Kani
 (bounded model checking of unsafe Rust), a separate item that
 complements this plan.
@@ -384,6 +398,8 @@ lean/
   BPlusTree/Proofs/Range.lean   -- Phase 4.3
   BPlusTree/Proofs/Depth.lean   -- finding 1
   BPlusTree/Proofs/Heap.lean    -- Phase 2b: store primitives, chain,
-                                --   insert simulation (done); remove next
+                                --   insert simulation (done)
+  BPlusTree/Proofs/HeapRemove.lean -- Phase 2b: repairs, root collapse,
+                                --   remove simulation (done)
   Replay/Main.lean, replay.sh   -- Phase 5.1 shape replay (done)
 ```
