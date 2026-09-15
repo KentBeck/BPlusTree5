@@ -71,12 +71,11 @@ link a reviewer checks by eye.
 | sorted-association-list insert (the spec) | `insertSorted` (`Model/Spec.lean`) | |
 | `keys[]` / `children[]` view of a branch | `Node.keysOf`, `Node.childrenOf`, `mkBranch` (`Model/Delete.lean`); `ChainA` (`Proofs/Delete.lean`) | `chain_iff_chainA`, `shape_of_arrays` |
 | `leaf_remove` | `leafRemove` | `leafRemove_spec` |
-| `plan_rebalance`, `child_len` | `planRebalance`, `childLen` | `planRebalance_spec`: what each choice knew |
+| `plan_rebalance`, `child_len` | `planRebalance`, `childLen` | `planRebalance_spec`: what each choice knew, and that every sibling it measured is present |
 | `rotate_leaf_right` / `rotate_leaf_left` / `merge_leaf_pair` | same names | `*_window`: repaired window well-formed, keys ordered, contents kept |
 | `rotate_branch_right` / `rotate_branch_left` / `merge_branch_pair` | same names | `*_window`, likewise |
 | `rebalance_leaf_child` / `rebalance_branch_child` / `fix_branch_child` | same names | `fixBranchChild_spec` |
 | `remove_rec` | `removeRec` | `removeRec_spec` |
-| `consolidate_root_children` + `absorb_root_child` | `consolidateRootChildren` | inside `removeTree_spec` |
 | `check_root_collapse`, `remove` | `checkRootCollapse`, `removeTree` | `removeTree_spec` |
 | sorted-association-list removal (the spec) | `eraseSorted` (`Model/Spec.lean`) | |
 
@@ -139,11 +138,13 @@ capacities at least 4 (what `with_caps` enforces):
   stating that the repaired window is well-formed on both sides with the
   separator strictly between its neighbours.
 
-The proofs settle the defensive arms in `delete.rs`: under `WF`,
-`fix_branch_child` never sees `len == 0` or a missing child, the
-`child_idx.min(len)` clamp is the identity, `plan_rebalance` never
-measures a missing sibling, and root collapse never meets an empty leaf
-child or ends with no survivor. Each is dead code that the Rust could
-drop.
+The proofs settled the defensive arms `delete.rs` used to carry: under
+`WF`, `fix_branch_child` never saw `len == 0` or a missing child, its
+`child_idx.min(len)` clamp was the identity, `plan_rebalance` never
+measured a missing sibling, and root collapse never met an empty leaf
+child or ended with no survivor. Those arms are gone from the Rust; the
+remaining `debug_assert!`s there name the preconditions the theorems
+supply, and `check_root_collapse` is now the two-case function
+`checkRootCollapse` mirrors.
 
 Not modelled here: `range`, `get`, node memory, and sibling pointers.

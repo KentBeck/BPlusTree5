@@ -125,7 +125,9 @@ fuzz+Miri gate with bench_delete unchanged. Notes against the plan:
     relationship becomes visible, and the merge loop gets faster for free.
 
 11. ~~DONE (3a) for the merge-overflow panics; `check_root_collapse`'s
-    null tolerance kept and now documented at the rebalancers.~~
+    null tolerance kept and now documented at the rebalancers. Later
+    removed: the Lean delete proofs showed the null slots were only ever
+    written by that loop itself, so it became a two-case function.~~
     **Turn "should not happen" into stated invariants.** The merge-overflow
     panics and similar defensive checks blur which states are possible.
     Where the invariant checker (run by the fuzzer after every mutation)

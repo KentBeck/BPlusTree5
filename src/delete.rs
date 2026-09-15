@@ -3,17 +3,6 @@ use crate::{
 };
 use core::ptr::{self, NonNull};
 
-/// What became of one root child during a root collapse.
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
-enum RootChild {
-    /// Freed; its slot must be cleared.
-    Freed,
-    /// Kept as the collapse's survivor.
-    Survives,
-    /// Cannot be folded in, so the root must stay.
-    Blocks,
-}
-
 /// How to refill an underfull child, chosen by `plan_rebalance`.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 enum Rebalance {
@@ -67,88 +56,42 @@ impl<K: Ord + Clone, V> BPlusTreeMap<K, V> {
         debug_assert!(self.entry_count > 0, "successful removal from an empty map");
         self.entry_count -= 1;
 
-        // Only check root collapse if root is a branch with few children.
-        // This avoids unnecessary checks when root is a leaf or has many children.
+        // Only a root branch left with one or two children can collapse;
+        // a leaf root or a wider branch skips the carve.
         unsafe {
-            if let Some(root) = self.root {
-                let hdr = &*(root.as_ptr() as *const NodeHdr);
-                if hdr.tag == NodeTag::Branch && (*hdr).len <= 2 {
-                    self.check_root_collapse();
-                }
+            let hdr = &*(root.as_ptr() as *const NodeHdr);
+            if hdr.tag == NodeTag::Branch && hdr.len <= 1 {
+                self.check_root_collapse(root);
             }
         }
 
         Some(value)
     }
 
-    /// Shrink a root branch that has at most two children down to its one
-    /// surviving child, or to an empty tree when nothing survives.
-    unsafe fn check_root_collapse(&mut self) {
-        let Some(root) = self.root else {
-            return;
-        };
-        if self.is_leaf(root) {
-            return;
-        }
+    /// Shrink a root branch with at most two children: a lone child becomes
+    /// the root, and two leaves whose contents fit in one are merged into
+    /// the new root. Anything else keeps the root as it is.
+    ///
+    /// Children are never null and a non-root leaf is never empty (see
+    /// `removeTree_spec` in `lean/BPlusTree/Proofs/Delete.lean`), so there
+    /// is nothing to skip or free on the way.
+    unsafe fn check_root_collapse(&mut self, root: NonNull<u8>) {
         let parts = layout::carve_branch::<K>(root, &self.branch_layout);
-        let child_count = (*parts.hdr).len as usize + 1;
-        if child_count > 2 {
-            return;
-        }
+        let len = (*parts.hdr).len as usize;
+        debug_assert!(
+            len <= 1,
+            "check_root_collapse on a root with more than two children"
+        );
 
         let children = parts.children_ptr as *mut *mut u8;
-        let Some(survivor) = self.consolidate_root_children(children, child_count) else {
-            return;
-        };
-        self.replace_root(root, survivor);
-    }
-
-    /// Fold the root's `child_count` children down to at most one node:
-    /// drop emptied leaves and merge two leaves that fit together. Returns
-    /// `None` when the root still needs more than one child, otherwise the
-    /// child that should become the new root (`Some(None)` when none is
-    /// left).
-    unsafe fn consolidate_root_children(
-        &mut self,
-        children: *mut *mut u8,
-        child_count: usize,
-    ) -> Option<Option<NonNull<u8>>> {
-        let mut survivor: Option<NonNull<u8>> = None;
-        for i in 0..child_count {
-            let slot = children.add(i);
-            let Some(child) = NonNull::new(*slot) else {
-                continue;
-            };
-            match self.absorb_root_child(survivor, child) {
-                RootChild::Freed => *slot = ptr::null_mut(),
-                RootChild::Survives => survivor = Some(child),
-                RootChild::Blocks => return None,
+        let first = NonNull::new_unchecked(*children);
+        if len == 1 {
+            let second = NonNull::new_unchecked(*children.add(1));
+            if !self.try_merge_leaves(first, second) {
+                return;
             }
         }
-        Some(survivor)
-    }
-
-    /// Fold one root child into the collapse so far: an emptied leaf is
-    /// freed outright, the first real child becomes the survivor, and a
-    /// later leaf is merged into a leaf survivor when it fits. Anything
-    /// else means the root cannot collapse.
-    unsafe fn absorb_root_child(
-        &mut self,
-        survivor: Option<NonNull<u8>>,
-        child: NonNull<u8>,
-    ) -> RootChild {
-        if self.is_leaf(child) && self.node_len(child) == 0 {
-            self.free_emptied_leaf(child);
-            return RootChild::Freed;
-        }
-        let Some(kept) = survivor else {
-            return RootChild::Survives;
-        };
-        if self.try_merge_leaves(kept, child) {
-            RootChild::Freed
-        } else {
-            RootChild::Blocks
-        }
+        self.replace_root(root, first);
     }
 
     /// Merge `source` into `target` and free `source`, but only when both
@@ -165,9 +108,8 @@ impl<K: Ord + Clone, V> BPlusTreeMap<K, V> {
         true
     }
 
-    /// Free the old root branch and install `survivor` (or nothing) in its
-    /// place.
-    unsafe fn replace_root(&mut self, root: NonNull<u8>, survivor: Option<NonNull<u8>>) {
+    /// Free the old root branch and install `survivor` in its place.
+    unsafe fn replace_root(&mut self, root: NonNull<u8>, survivor: NonNull<u8>) {
         #[cfg(feature = "delete_profile")]
         {
             self.delete_profile.root_collapses += 1;
@@ -176,12 +118,10 @@ impl<K: Ord + Clone, V> BPlusTreeMap<K, V> {
         // Unlike the merge paths, a collapsing root still owns its
         // separators: nothing moved them elsewhere.
         self.empty_branch(root);
-        if let Some(child) = survivor {
-            if self.is_leaf(child) {
-                self.make_leaf_root(child);
-            }
+        if self.is_leaf(survivor) {
+            self.make_leaf_root(survivor);
         }
-        self.root = survivor;
+        self.root = Some(survivor);
         self.free_emptied_branch(root);
     }
 
@@ -288,24 +228,21 @@ impl<K: Ord + Clone, V> BPlusTreeMap<K, V> {
 
     /// Repair one known-underfull child. Returns whether repairing it made the
     /// containing branch underfull in turn.
+    ///
+    /// A branch holds at least one separator and `child_idx` addresses one
+    /// of its `len + 1` children (`fixBranchChild_spec` in
+    /// `lean/BPlusTree/Proofs/Delete.lean`).
     unsafe fn fix_branch_child(&mut self, branch: NonNull<u8>, child_idx: usize) -> bool {
         let parts = layout::carve_branch::<K>(branch, &self.branch_layout);
         let len = (*parts.hdr).len as usize;
-        if len == 0 {
-            return true;
-        }
+        debug_assert!(len > 0, "fix_branch_child on an empty branch");
+        debug_assert!(child_idx <= len, "child index out of range");
 
         let children = parts.children_ptr as *mut *mut u8;
-        let idx = child_idx.min(len);
-        let child_ptr = *children.add(idx);
-        let Some(_) = NonNull::new(child_ptr) else {
-            return len < self.min_branch_len();
-        };
-
-        let child_hdr = &*(child_ptr as *const NodeHdr);
-        let branch_lost_child = match child_hdr.tag {
-            NodeTag::Leaf => self.rebalance_leaf_child(branch, idx, len),
-            NodeTag::Branch => self.rebalance_branch_child(branch, idx, len),
+        let child = NonNull::new_unchecked(*children.add(child_idx));
+        let branch_lost_child = match (*(child.as_ptr() as *const NodeHdr)).tag {
+            NodeTag::Leaf => self.rebalance_leaf_child(branch, child_idx, len),
+            NodeTag::Branch => self.rebalance_branch_child(branch, child_idx, len),
         };
         branch_lost_child && len - 1 < self.min_branch_len()
     }
@@ -361,10 +298,9 @@ impl<K: Ord + Clone, V> BPlusTreeMap<K, V> {
 
     /// Decide how to refill the underfull `children[child_idx]`: prefer
     /// borrowing from a sibling that holds more than `min` (left first),
-    /// else merge with the left sibling, else the right.
-    /// Null siblings can occur at the root while `check_root_collapse` is
-    /// mid-repair; they can never lend, but the merge fallback assumes the
-    /// chosen neighbour is present, as it always is below the root.
+    /// else merge with the left sibling, else the right. Every sibling the
+    /// plan looks at is present (`planRebalance_spec` and
+    /// `fixBranchChild_spec` in `lean/BPlusTree/Proofs/Delete.lean`).
     unsafe fn plan_rebalance(
         &self,
         branch: NonNull<u8>,
@@ -392,10 +328,10 @@ impl<K: Ord + Clone, V> BPlusTreeMap<K, V> {
         Rebalance::MergeWithRight
     }
 
-    /// Length of `children[idx]`, or 0 for a null slot.
+    /// Length of `children[idx]`.
     #[inline(always)]
     unsafe fn child_len(&self, children: *mut *mut u8, idx: usize) -> usize {
-        NonNull::new(*children.add(idx)).map_or(0, |node| self.node_len(node))
+        self.node_len(NonNull::new_unchecked(*children.add(idx)))
     }
 
     /// Rotate one entry rightward through separator `sep_idx`: the left

@@ -72,17 +72,16 @@ fn main() {
     writeln!(w, "CAPS {} {}", leaf_cap, branch_cap).unwrap();
 
     let mut i = 0usize;
-    let check =
-        |tree: &BPlusTreeMap<i64, i64>, i: usize, last: bool, w: &mut BufWriter<File>| {
-            if i % check_every == 0 || last {
-                tree.check_invariants_detailed()
-                    .unwrap_or_else(|why| panic!("invariants broken after op {}: {}", i, why));
-                writeln!(w, "# {:016x}", tree.shape_hash()).unwrap();
-            }
-            if shape_at == Some(i) {
-                println!("{}", tree.dump_shape());
-            }
-        };
+    let check = |tree: &BPlusTreeMap<i64, i64>, i: usize, last: bool, w: &mut BufWriter<File>| {
+        if i % check_every == 0 || last {
+            tree.check_invariants_detailed()
+                .unwrap_or_else(|why| panic!("invariants broken after op {}: {}", i, why));
+            writeln!(w, "# {:016x}", tree.shape_hash()).unwrap();
+        }
+        if shape_at == Some(i) {
+            println!("{}", tree.dump_shape());
+        }
+    };
 
     for _ in 0..ops {
         i += 1;

@@ -62,7 +62,9 @@ def Rebalance.mergesSiblings : Rebalance → Bool
   | .mergeWithLeft | .mergeWithRight => true
   | _ => false
 
-/-- `child_len`: length of `children[idx]`, or 0 for a missing slot. -/
+/-- `child_len`: length of `children[idx]`. The Rust reads the slot
+unchecked; the model needs a total function, so an index past the end
+reads as 0 (the proofs show it never is). -/
 def childLen (children : List (Node K V)) (idx : Nat) : Nat :=
   match children[idx]? with
   | some n => n.len
@@ -175,7 +177,9 @@ def rebalanceBranchChild (bc : Nat) (keys : List K) (children : List (Node K V))
   (arrays.1, arrays.2, repair.mergesSiblings)
 
 /-- `fix_branch_child`: repair the underfull `children[childIdx]`; report
-whether the branch itself became underfull. -/
+whether the branch itself became underfull. The Rust asserts that the
+branch is nonempty and the index is in range; the model, needing to be
+total, leaves a leaf or an out-of-range index alone. -/
 def fixBranchChild (lc bc : Nat) (node : Node K V) (childIdx : Nat) : Node K V × Bool :=
   match node with
   | .leaf _ => (node, false)
@@ -183,16 +187,13 @@ def fixBranchChild (lc bc : Nat) (node : Node K V) (childIdx : Nat) : Node K V �
     let keys := es.map (·.1)
     let children := c0 :: es.map (·.2)
     let len := keys.length
-    if len = 0 then (node, true)
-    else
-      let idx := min childIdx len
-      match children[idx]? with
-      | none => (node, len < minBranchLen bc)
-      | some child =>
-        let repaired := match child with
-          | .leaf _ => rebalanceLeafChild lc keys children idx len
-          | .branch _ _ => rebalanceBranchChild bc keys children idx len
-        (mkBranch repaired.1 repaired.2.1, repaired.2.2 && decide (len - 1 < minBranchLen bc))
+    match children[childIdx]? with
+    | none => (node, false)
+    | some child =>
+      let repaired := match child with
+        | .leaf _ => rebalanceLeafChild lc keys children childIdx len
+        | .branch _ _ => rebalanceBranchChild bc keys children childIdx len
+      (mkBranch repaired.1 repaired.2.1, repaired.2.2 && decide (len - 1 < minBranchLen bc))
 
 /-- `remove_rec`: the removed value, the node afterwards, and whether it
 became underfull. -/
@@ -221,39 +222,15 @@ decreasing_by
   have h2 := sizeOf_takeWhile_le (sepLE k) entries
   omega
 
-/-- `consolidate_root_children` with `absorb_root_child` inlined: an
-emptied leaf is freed, the first real child becomes the survivor, and a
-later leaf is merged into a leaf survivor when it fits. Anything else
-blocks the collapse. -/
-def consolidateRootChildren (lc : Nat) : Option (Node K V) → List (Node K V) →
-    Option (Option (Node K V))
-  | survivor, [] => some survivor
-  | survivor, child :: rest =>
-    match child with
-    | .leaf [] => consolidateRootChildren lc survivor rest
-    | _ =>
-      match survivor with
-      | none => consolidateRootChildren lc (some child) rest
-      | some kept =>
-        match kept, child with
-        | .leaf L, .leaf R =>
-          if L.length + R.length ≤ lc then consolidateRootChildren lc (some (.leaf (L ++ R))) rest
-          else none
-        | _, _ => none
-
-/-- `check_root_collapse`. A root with no surviving child becomes the empty
-tree, which the model renders as an empty leaf (the Rust `root = None`
-allocates a fresh leaf on the next insert). -/
+/-- `check_root_collapse`: a root branch with one child hands over to
+that child; with two leaf children whose contents fit in one leaf, the
+merged leaf becomes the root. Any other root stays. -/
 def checkRootCollapse (lc : Nat) (root : Node K V) : Node K V :=
   match root with
-  | .leaf _ => root
-  | .branch c0 es =>
-    if es.length + 1 > 2 then root
-    else
-      match consolidateRootChildren lc none (c0 :: es.map (·.2)) with
-      | none => root
-      | some none => .leaf []
-      | some (some survivor) => survivor
+  | .branch c0 [] => c0
+  | .branch (.leaf L) [(_, .leaf R)] =>
+    if L.length + R.length ≤ lc then .leaf (L ++ R) else root
+  | _ => root
 
 /-- `remove`. -/
 def removeTree (lc bc : Nat) (root : Node K V) (k : K) : Option (V × Node K V) :=
@@ -261,7 +238,7 @@ def removeTree (lc bc : Nat) (root : Node K V) (k : K) : Option (V × Node K V) 
   | none => none
   | some (v, root', _) =>
     match root' with
-    | .branch _ es => if es.length ≤ 2 then some (v, checkRootCollapse lc root') else some (v, root')
+    | .branch _ es => if es.length ≤ 1 then some (v, checkRootCollapse lc root') else some (v, root')
     | .leaf _ => some (v, root')
 
 end Delete

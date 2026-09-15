@@ -1125,7 +1125,6 @@ theorem fixBranchChild_spec (lc bc h : Nat) (hlc : 4 ≤ lc) (hbc : 4 ≤ bc) (i
     simp at h1 h2; omega
   have hlenks : 1 ≤ (ks1 ++ ks2).length := by
     split at hfill <;> omega
-  have hidx : cs1.length ≤ (ks1 ++ ks2).length := by simp; omega
   have htl0 : (Node.branch c0 es).toList = ((cs1 ++ new :: cs2).map Node.toList).flatten := by
     rw [toList_branch_flatten, hchildren]
   have hmb := minBranchLen_eq (bc := bc) (by omega)
@@ -1133,8 +1132,7 @@ theorem fixBranchChild_spec (lc bc h : Nat) (hlc : 4 ≤ lc) (hbc : 4 ≤ bc) (i
   simp only [fixBranchChild] at hfix
   rw [show es.map (·.1) = ks1 ++ ks2 from hkeys,
     show c0 :: es.map (·.2) = cs1 ++ new :: cs2 from hchildren] at hfix
-  simp only [if_neg (by omega : ¬ (ks1 ++ ks2).length = 0), Nat.min_eq_left hidx,
-    getElem?_window_fst] at hfix
+  simp only [getElem?_window_fst] at hfix
   cases h with
   | zero =>
     obtain ⟨kvsN, rfl⟩ := shape_leaf hnew
@@ -1539,9 +1537,22 @@ theorem removeTree_eq_branch {lc bc : Nat} {root : Node K V} {k : K} {v : V} {c0
     {es : List (K × Node K V)} {under : Bool}
     (hres : removeRec lc bc k root = some (v, .branch c0 es, under)) :
     removeTree lc bc root k =
-      if es.length ≤ 2 then some (v, checkRootCollapse lc (.branch c0 es))
+      if es.length ≤ 1 then some (v, checkRootCollapse lc (.branch c0 es))
       else some (v, .branch c0 es) := by
   unfold removeTree; rw [hres]
+
+theorem checkRootCollapse_one (lc : Nat) (c0 : Node K V) :
+    checkRootCollapse lc (.branch c0 []) = c0 := rfl
+
+theorem checkRootCollapse_leaves (lc : Nat) (L : Leaf K V) (s : K) (R : Leaf K V) :
+    checkRootCollapse lc (.branch (.leaf L) [(s, .leaf R)]) =
+      if L.length + R.length ≤ lc then .leaf (L ++ R)
+      else .branch (.leaf L) [(s, .leaf R)] := rfl
+
+theorem checkRootCollapse_branches (lc : Nat) (lc0 : Node K V) (les : List (K × Node K V))
+    (s : K) (rc0 : Node K V) (res : List (K × Node K V)) :
+    checkRootCollapse lc (.branch (.branch lc0 les) [(s, .branch rc0 res)]) =
+      .branch (.branch lc0 les) [(s, .branch rc0 res)] := rfl
 
 /-- `remove` on a well-formed root: the removed pair was there, the new
 tree's entries are `eraseSorted` of the old, and the new root is
@@ -1573,73 +1584,45 @@ theorem removeTree_spec (lc bc : Nat) (hlc : 4 ≤ lc) (hbc : 4 ≤ bc) (h : Nat
           WF lc bc (hc + 1) true none none (.branch c0' es) := fun hpos =>
         wf_of_shape_root ⟨hs', hb', hcap', hchain'⟩ (fun _ _ hn => by cases hn; exact hpos)
       rw [removeTree_eq_branch hres]
-      by_cases hle : es.length ≤ 2
+      by_cases hle : es.length ≤ 1
       · rw [if_pos hle]
         show (k, v) ∈ root.toList ∧
           (checkRootCollapse lc (.branch c0' es)).toList = eraseSorted k root.toList ∧
           ∃ h', h' ≤ hc + 1 ∧ WF lc bc h' true none none (checkRootCollapse lc (.branch c0' es))
-        simp only [checkRootCollapse]
-        by_cases hgt : es.length + 1 > 2
-        · rw [if_pos hgt]
-          exact ⟨hmem, htl, hc + 1, Nat.le_refl _, hroot_wf (by omega)⟩
-        · rw [if_neg hgt]
-          rcases es with _ | ⟨⟨s, c1⟩, rest⟩
-          · -- One child: it becomes the root.
-            have hwc : WF lc bc hc false none none c0' := hchain'
-            have hne : c0'.toList ≠ [] := wf_toList_ne_nil lc bc (by omega) hc c0' _ _ hwc
-            have hcons : consolidateRootChildren lc none [c0'] = some (some c0') := by
-              cases c0' with
-              | leaf L =>
-                cases L with
-                | nil => exact absurd rfl hne
-                | cons x L' => rfl
-              | branch _ _ => rfl
-            simp only [List.map_nil]
-            rw [hcons]
-            refine ⟨hmem, ?_, hc, Nat.le_succ _, wf_root_of_nonroot (by omega) hwc⟩
-            rw [← htl]; simp [Node.toList, entriesToList]
-          · rcases rest with _ | ⟨_, _⟩
-            · -- Two children: two leaves merge if they fit; otherwise stay.
-              have hwc0 : WF lc bc hc false none (some s) c0' := hchain'.1
-              have hwc1 : WF lc bc hc false (some s) none c1 := hchain'.2
-              have hne0 : c0'.toList ≠ [] := wf_toList_ne_nil lc bc (by omega) hc c0' _ _ hwc0
-              have hne1 : c1.toList ≠ [] := wf_toList_ne_nil lc bc (by omega) hc c1 _ _ hwc1
-              cases hc with
-              | zero =>
-                obtain ⟨L, rfl⟩ := shape_leaf (shape_of_wf hwc0)
-                obtain ⟨R, rfl⟩ := shape_leaf (shape_of_wf hwc1)
-                rw [leaf_wf_iff] at hwc0 hwc1
-                cases L with
-                | nil => exact absurd rfl hne0
-                | cons x L' =>
-                cases R with
-                | nil => exact absurd rfl hne1
-                | cons y R' =>
-                have hcons : consolidateRootChildren lc none
-                    (Node.leaf (x :: L') :: [(s, Node.leaf (y :: R'))].map (·.2)) =
-                    if (x :: L').length + (y :: R').length ≤ lc
-                    then some (some (.leaf ((x :: L') ++ (y :: R')))) else none := rfl
-                rw [hcons]
-                by_cases hfit : (x :: L').length + (y :: R').length ≤ lc
-                · rw [if_pos hfit]
-                  refine ⟨hmem, ?_, 0, by omega, ?_⟩
-                  · rw [← htl]; simp [Node.toList, entriesToList]
-                  · rw [WF]
-                    refine ⟨?_, fun e _ => ⟨(fun _ hl => by cases hl), (fun _ hh => by cases hh)⟩,
-                      by simp at hfit ⊢; omega, Or.inl rfl⟩
-                    simp only [Sorted, List.pairwise_append]
-                    exact ⟨hwc0.1, hwc1.1, fun a ha b hb =>
-                      lt_of_lt_of_le ((hwc0.2.1 a ha).2 s rfl) ((hwc1.2.1 b hb).1 s rfl)⟩
-                · rw [if_neg hfit]
-                  exact ⟨hmem, htl, 1, Nat.le_refl _, hroot_wf (by simp)⟩
-              | succ hc' =>
-                obtain ⟨lc0, les, rfl⟩ := shape_branch (shape_of_wf hwc0)
-                obtain ⟨rc0, res, rfl⟩ := shape_branch (shape_of_wf hwc1)
-                have hcons : consolidateRootChildren lc none
-                    (Node.branch lc0 les :: [(s, Node.branch rc0 res)].map (·.2)) = none := rfl
-                rw [hcons]
-                exact ⟨hmem, htl, hc' + 1 + 1, Nat.le_refl _, hroot_wf (by simp)⟩
-            · simp at hgt
+        rcases es with _ | ⟨⟨s, c1⟩, rest⟩
+        · -- One child: it becomes the root.
+          have hwc : WF lc bc hc false none none c0' := hchain'
+          rw [checkRootCollapse_one]
+          refine ⟨hmem, ?_, hc, Nat.le_succ _, wf_root_of_nonroot (by omega) hwc⟩
+          rw [← htl]; simp [Node.toList, entriesToList]
+        · rcases rest with _ | ⟨_, _⟩
+          · -- Two children: two leaves merge if they fit; otherwise stay.
+            have hwc0 : WF lc bc hc false none (some s) c0' := hchain'.1
+            have hwc1 : WF lc bc hc false (some s) none c1 := hchain'.2
+            cases hc with
+            | zero =>
+              obtain ⟨L, rfl⟩ := shape_leaf (shape_of_wf hwc0)
+              obtain ⟨R, rfl⟩ := shape_leaf (shape_of_wf hwc1)
+              rw [leaf_wf_iff] at hwc0 hwc1
+              rw [checkRootCollapse_leaves]
+              by_cases hfit : L.length + R.length ≤ lc
+              · rw [if_pos hfit]
+                refine ⟨hmem, ?_, 0, by omega, ?_⟩
+                · rw [← htl]; simp [Node.toList, entriesToList]
+                · rw [WF]
+                  refine ⟨?_, fun e _ => ⟨(fun _ hl => by cases hl), (fun _ hh => by cases hh)⟩,
+                    by simp at hfit ⊢; omega, Or.inl rfl⟩
+                  simp only [Sorted, List.pairwise_append]
+                  exact ⟨hwc0.1, hwc1.1, fun a ha b hb =>
+                    lt_of_lt_of_le ((hwc0.2.1 a ha).2 s rfl) ((hwc1.2.1 b hb).1 s rfl)⟩
+              · rw [if_neg hfit]
+                exact ⟨hmem, htl, 1, Nat.le_refl _, hroot_wf (by simp)⟩
+            | succ hc' =>
+              obtain ⟨lc0, les, rfl⟩ := shape_branch (shape_of_wf hwc0)
+              obtain ⟨rc0, res, rfl⟩ := shape_branch (shape_of_wf hwc1)
+              rw [checkRootCollapse_branches]
+              exact ⟨hmem, htl, hc' + 1 + 1, Nat.le_refl _, hroot_wf (by simp)⟩
+          · simp at hle
       · rw [if_neg hle]
         exact ⟨hmem, htl, hc + 1, Nat.le_refl _, hroot_wf (by omega)⟩
 

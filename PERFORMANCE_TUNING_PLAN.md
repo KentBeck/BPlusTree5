@@ -122,8 +122,9 @@ a. ~~**Stop zeroing vacated slots on split paths.**~~ — DONE, but
    **perf-neutral**. All `write_bytes` zeroing of vacated key/value/child
    slots on the insert split paths, the delete borrow/merge paths, and
    `move_kv_at` is removed; occupancy is defined solely by `hdr.len` (the
-   null child-pointer sentinels in delete.rs stay — `check_root_collapse`
-   reads them). Proved safe by the full gate including Miri over the fuzz,
+   null child-pointer sentinels `check_root_collapse` wrote and read for
+   itself went later, once the Lean delete proofs showed nothing else
+   produced a null child). Proved safe by the full gate including Miri over the fuzz,
    drop/clear, and borrowing suites. An interleaved A/B of the before/after
    binaries showed no gain beyond noise (the commit message's claimed
    improvement was cross-run variance — see the measurement note below).

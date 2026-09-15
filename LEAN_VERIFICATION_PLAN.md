@@ -84,7 +84,8 @@ function one-to-one, same name, same arithmetic:
   `merge_branch_into` moves it down.
 - `remove_rec` returns the value and an "underflowed" flag;
   `fix_branch_child` turns a child merge into a parent underflow.
-- `check_root_collapse` / `consolidate_root_children` / `replace_root`.
+- `check_root_collapse` (one child hands over; two leaves that fit merge)
+  / `replace_root`.
 
 `insert_rec` and `remove_rec` are both direct recursions, so the model's
 `insert` and `remove` port them one-to-one with no bridging lemma.
@@ -99,8 +100,8 @@ than the code until the code has been refactored to match.
 `insertTree`) and define `Node.toList`. `Model/Delete.lean` ports
 `delete.rs` in full (`leafRemove`, `planRebalance`, the two leaf and two
 branch rotations, the two merges, `fixBranchChild`, `removeRec`,
-`consolidateRootChildren`, `checkRootCollapse`, `removeTree`), replayed
-and proved. Range and get are not started.
+`checkRootCollapse`, `removeTree`), replayed and proved. Range and get
+are not started.
 
 ## Phase 2b — the heap model (memory safety)
 
@@ -258,9 +259,13 @@ a decision on; each is either a theorem or a code change.
    proofs: under `WF`, `fix_branch_child` never sees `len == 0` or a
    missing child and its `child_idx.min(len)` clamp is the identity;
    `plan_rebalance` never measures a missing sibling; root collapse never
-   meets an empty leaf child or ends with no survivor. The model kept
-   these arms so the proofs could speak to them; the Rust can now delete
-   them as a separate cleanup.
+   meets an empty leaf child or ends with no survivor. The Rust arms are
+   now removed (`fix_branch_child` asserts its preconditions,
+   `check_root_collapse` is a two-case function, the `RootChild` enum and
+   `consolidate_root_children` / `absorb_root_child` are gone) and the
+   model was simplified in step so it still mirrors the code. Still
+   `Option`-shaped for a null child that cannot occur: `child_for_key` in
+   `common.rs`, shared with the unmodelled lookup paths.
 3. **The runtime checker never verifies uniform leaf depth.** The model
    proves it; adding the check to the Rust validator is Phase 5.3.
 4. **`min_branch_len`'s `cap <= 2` arm is dead** since `with_caps`
