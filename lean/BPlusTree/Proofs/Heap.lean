@@ -2056,7 +2056,7 @@ theorem insertH_sim (lc bc : Nat) (hlc : 2 ≤ lc) (hbc : 2 ≤ bc) (d fuel : Na
     (m : HeapMap K V) (t : Node K V) (hinv : HeapInv m d t) (k : K) (v : V) (ht : Nat)
     (hwf : WF lc bc ht true none none t) :
     ∃ old m', insertH lc bc fuel m k v = some (old, m') ∧ old = (insertTree lc bc t k v).2 ∧
-      ∃ d', HeapInv m' d' (insertTree lc bc t k v).1 := by
+      ∃ d', d' ≤ d + 1 ∧ HeapInv m' d' (insertTree lc bc t k v).1 := by
   obtain ⟨root, ids, lv, hroot, hsub, hnd, hb, hdom, hchain, hcount⟩ := hinv
   have hsorted := wf_toList_sorted lc bc ht t true none none hwf
   obtain ⟨htl, hsome, hnone⟩ := insertTree_toList lc bc hlc hbc ht t k v hwf
@@ -2081,7 +2081,8 @@ theorem insertH_sim (lc bc : Nat) (hlc : 2 ≤ lc) (hbc : 2 ≤ bc) (d fuel : Na
       obtain ⟨rfl, ids', lv', hsub', hnd', hgrow, _, hchain', hfr⟩ := hpost
       have htree : insertTree lc bc t k v = (t', old) := by
         unfold insertTree; rw [htc]
-      refine ⟨old, ⟨h', some root, if old.isNone then m.count + 1 else m.count⟩, ?_, ?_, d, ?_⟩
+      refine ⟨old, ⟨h', some root, if old.isNone then m.count + 1 else m.count⟩, ?_, ?_, d,
+        Nat.le_succ d, ?_⟩
       · simp only [insertH, hroot, hrec]; rfl
       · rw [htree]
       · rw [htree]
@@ -2116,7 +2117,7 @@ theorem insertH_sim (lc bc : Nat) (hlc : 2 ≤ lc) (hbc : 2 ≤ bc) (d fuel : Na
       (by rw [reachChildren_cons, reachChildren_cons, hsubL.reach, hsubR.reach]
           simp [reachIds.reachChildren]) hsame
     refine ⟨none, ⟨(h'.alloc (.branch root [(sep, rid)])).2, some h'.fresh, m.count + 1⟩, ?_, ?_,
-      d + 1, ?_⟩
+      d + 1, Nat.le_refl _, ?_⟩
     · simp only [insertH, hroot, hrec, Option.bind_eq_bind, Option.bind_some]
       rw [show h'.alloc (.branch root [(sep, rid)]) = (h'.fresh, (h'.alloc (.branch root [(sep, rid)])).2) from rfl]
       first | rfl | simp

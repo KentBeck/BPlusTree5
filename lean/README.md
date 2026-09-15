@@ -285,7 +285,29 @@ What is proved for the reads (`Proofs/HeapRead.lean`, about 800 lines):
   returns. A back leaf before the front leaf cannot happen once the
   first item passes the end bound, because the chain is sorted.
 
-Not yet proved at this level: the value-token accounting.
+What is proved for the value-token accounting (`Proofs/HeapLedger.lean`,
+about 500 lines):
+
+- `dropSubtreeH_spec` and `clearH_sim`: `Drop` / `clear` free exactly the
+  subtree's nodes and leave the store empty. On the heap model `free`
+  faults on an unallocated id, so no fault is no double free, and an
+  empty store is no leak: every slot's contents are dropped exactly once.
+- The ledger. The models are functional, so "dropped twice" is not a
+  thing they can say directly; what the Rust's ownership discipline
+  amounts to is a conservation law. `Op` is `ins` / `rem` / `clear`,
+  `runT` runs a trace on the tree model collecting what is handed back
+  and what `clear` drops, and `ledger` proves: live entries plus entries
+  handed back plus entries dropped is a permutation of the starting
+  entries plus everything inserted (`insertSorted_perm_*`,
+  `eraseSorted_perm`).
+- `runH_sim` and `runH_ledger`: the heap model runs any trace from the
+  empty map without a fault, hands back exactly what the tree model hands
+  back, ends mirroring the tree model's tree (`MapOK`, which also covers
+  the rootless map `clear` leaves; `heapInv_live` says the live leaf
+  contents are that tree's entries), and the ledger balances. So every
+  entry ever inserted is, at the end, in exactly one place.
+
+Phase 2b is complete at the level of node allocation and slot contents.
 
 Not modelled here: node memory itself, byte offsets, and aliasing, which
 stay with Miri.

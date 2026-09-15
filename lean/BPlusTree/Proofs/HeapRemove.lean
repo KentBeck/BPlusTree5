@@ -2627,7 +2627,7 @@ theorem checkRootCollapseH_sim (lc : Nat) {d : Nat} {h : Heap K V} {root c0 : No
     (hnd : ids.Nodup) (hb : Heap.Bounded h) (hdom : ∀ i, (h.get i).isSome ↔ i ∈ ids)
     (hchain : Linked h none lv none) (hle : es.length ≤ 1) :
     ∃ r' h', checkRootCollapseH lc h root = some (r', h') ∧
-      ∃ d' ids' lv', Sub h' (d' + 1) r' (checkRootCollapse lc t) ids' lv' ∧ ids'.Nodup ∧
+      ∃ d' ids' lv', d' ≤ d + 1 ∧ Sub h' (d' + 1) r' (checkRootCollapse lc t) ids' lv' ∧ ids'.Nodup ∧
         Heap.Bounded h' ∧ (∀ i, (h'.get i).isSome ↔ i ∈ ids') ∧ Linked h' none lv' none := by
   obtain ⟨t0, ts, below, h0, hes, rfl, hbelow, rfl, hlvb⟩ := sub_branch_inv hg hsub
   have halloc : ∀ i ∈ root :: below, (h.get i).isSome :=
@@ -2656,7 +2656,7 @@ theorem checkRootCollapseH_sim (lc : Nat) {d : Nat} {h : Heap K V} {root c0 : No
         · rw [hbranch' cc0 ces hgc]; exact sameContent_refl _
       · exact sameContent_of_eq (hother' i hir hic)
     obtain ⟨hL0', habs', hlv'⟩ := walks_congr (d + 1) h h' c0 below hL0 hsame
-    refine ⟨c0, h', hrun, d, below, lv, ⟨by rw [habs', checkRootCollapse_one]; exact h0, hL0',
+    refine ⟨c0, h', hrun, d, below, lv, Nat.le_succ d, ⟨by rw [habs', checkRootCollapse_one]; exact h0, hL0',
       by rw [hlv']; exact hlv0⟩, hndb, ?_, ?_, ?_⟩
     · refine bounded_of_subset hb hfr' (fun i hi => ?_)
       by_cases hir : i = root
@@ -2712,10 +2712,10 @@ theorem checkRootCollapseH_sim (lc : Nat) {d : Nat} {h : Heap K V} {root c0 : No
       have hc0some := halloc c0 (List.mem_cons_of_mem _ hc0mem)
       have hc1some := halloc c1 (List.mem_cons_of_mem _ hc1mem)
       -- the unchanged outcome
-      have hstay : ∃ d' ids' lv', Sub h (d' + 1) root (.branch t0 [(s, tc1)]) ids' lv' ∧
+      have hstay : ∃ d' ids' lv', d' ≤ d + 1 ∧ Sub h (d' + 1) root (.branch t0 [(s, tc1)]) ids' lv' ∧
           ids'.Nodup ∧ Heap.Bounded h ∧ (∀ i, (h.get i).isSome ↔ i ∈ ids') ∧
           Linked h none lv' none :=
-        ⟨d + 1, _, _, hsub, hnd, hb, hdom, hchain⟩
+        ⟨d + 1, _, _, Nat.le_refl _, hsub, hnd, hb, hdom, hchain⟩
       rcases hgc0 : h.get c0 with _ | (⟨T, p0, n0⟩ | ⟨cc0, ces⟩) <;>
         rcases hgc1 : h.get c1 with _ | (⟨S, p1, n1⟩ | ⟨cc1, ces1⟩)
       all_goals (try (simp [hgc0] at hc0some; done))
@@ -2759,7 +2759,7 @@ theorem checkRootCollapseH_sim (lc : Nat) {d : Nat} {h : Heap K V} {root c0 : No
             intro i hir hic0 hic1
             rw [ho4 i hir hic0, ho3 i hic0 hic1 (by simp), ho2 i hic1, ho1 i hic0]
           have hgc1_4 : h4.get c1 = none := by rw [ho4 c1 hc1ne (Ne.symm hc01)]; exact hg3b
-          refine ⟨c0, h4, hrun, 0, [c0], [c0],
+          refine ⟨c0, h4, hrun, 0, [c0], [c0], Nat.zero_le _,
             ⟨absNode_leaf hgc4 0, reachIds_leaf hgc4 0, leafIds_leaf hgc4 0⟩, by simp, ?_, ?_,
             linked_singleton.mpr ⟨_, hgc4⟩⟩
           · refine bounded_of_subset hb (by rw [hf4, hf3, hf2, hf1]) (fun i hi => ?_)
@@ -2802,7 +2802,7 @@ theorem removeH_sim (lc bc : Nat) (hlc : 4 ≤ lc) (hbc : 4 ≤ bc) (d fuel : Na
     (hwf : WF lc bc ht true none none t) :
     ∃ res m', removeH lc bc fuel m k = some (res, m') ∧
       (removeTree lc bc t k = none → res = none ∧ m' = m) ∧
-      (∀ v t', removeTree lc bc t k = some (v, t') → res = some v ∧ ∃ d', HeapInv m' d' t') := by
+      (∀ v t', removeTree lc bc t k = some (v, t') → res = some v ∧ ∃ d', d' ≤ d ∧ HeapInv m' d' t') := by
   obtain ⟨root, ids, lv, hroot, hsub, hnd, hb, hdom, hchain, hcount⟩ := hinv
   have hsorted := wf_toList_sorted lc bc ht t true none none hwf
   have hk : InBounds (K := K) none none k :=
@@ -2842,7 +2842,7 @@ theorem removeH_sim (lc bc : Nat) (hlc : 4 ≤ lc) (hbc : 4 ≤ bc) (d fuel : Na
       · rw [removeTree_eq_leaf hres] at hrt; cases hrt
       · rw [removeTree_eq_leaf hres] at hrt
         cases hrt
-        exact ⟨rfl, d, hstay⟩
+        exact ⟨rfl, d, Nat.le_refl _, hstay⟩
     · dsimp only
       obtain ⟨d0, rfl⟩ : ∃ d0, d = d0 + 1 := by
         cases d with
@@ -2854,14 +2854,14 @@ theorem removeH_sim (lc bc : Nat) (hlc : 4 ≤ lc) (hbc : 4 ≤ bc) (d fuel : Na
       by_cases hle : es.length ≤ 1
       · rw [if_pos hle]
         rw [if_pos (by rw [hlents]; exact hle)] at htree
-        obtain ⟨r', h'', hrun, d', ids'', lv'', hsub'', hnd'', hb'', hdom'', hchain''⟩ :=
+        obtain ⟨r', h'', hrun, d', ids'', lv'', hd', hsub'', hnd'', hb'', hdom'', hchain''⟩ :=
           checkRootCollapseH_sim lc hgr hsub' hnd' hb' hdom' hchain' hle
         simp only [hrun, Option.bind_some]
         refine ⟨some v, ⟨h'', some r', m.count - 1⟩, rfl, fun hrt => ?_, fun v' t'' hrt => ?_⟩
         · rw [htree] at hrt; cases hrt
         · rw [htree] at hrt
           cases hrt
-          refine ⟨rfl, d', r', ids'', lv'', rfl, hsub'', hnd'', hb'', hdom'', hchain'', ?_⟩
+          refine ⟨rfl, d', hd', r', ids'', lv'', rfl, hsub'', hnd'', hb'', hdom'', hchain'', ?_⟩
           rw [toList_checkRootCollapse]; exact hcount'
       · rw [if_neg hle]
         rw [if_neg (by rw [hlents]; exact hle)] at htree
@@ -2869,7 +2869,7 @@ theorem removeH_sim (lc bc : Nat) (hlc : 4 ≤ lc) (hbc : 4 ≤ bc) (d fuel : Na
         · rw [htree] at hrt; cases hrt
         · rw [htree] at hrt
           cases hrt
-          exact ⟨rfl, d0 + 1, hstay⟩
+          exact ⟨rfl, d0 + 1, Nat.le_refl _, hstay⟩
 
 end HeapRemove
 

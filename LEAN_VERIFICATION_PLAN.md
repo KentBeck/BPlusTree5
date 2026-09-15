@@ -201,8 +201,18 @@ bound resolves to a `(leaf, index)` pair that is the tree model's
 position, and `Items::next` hopping along `next` from the front leaf to
 the back leaf reads exactly the tree model's slice.
 
-Not yet proved at this level: the value-token accounting (no double
-drop of a `K` / `V`).
+Proved (`lean/BPlusTree/Proofs/HeapLedger.lean`, about 500 lines): the
+value-token accounting. `dropSubtreeH_spec` / `clearH_sim`: `Drop` and
+`clear` free exactly the subtree's nodes and leave the store empty, so
+every slot's contents are dropped exactly once. `ledger` and
+`runH_ledger`: over any sequence of `insert`, `remove` and `clear` from
+the empty map, the heap model never faults, hands back what the tree
+model hands back, ends mirroring the tree model's tree, and the live
+entries plus the entries handed back plus the entries dropped by `clear`
+are a permutation of everything inserted. That is the conservation law
+"every entry is in exactly one place" that no double drop and no lost
+value amount to, stated at the level the models can state it (slot
+contents, not bytes).
 Verifying the Rust source itself for memory safety would be Kani
 (bounded model checking of unsafe Rust), a separate item that
 complements this plan.
@@ -413,5 +423,7 @@ lean/
                                 --   remove simulation (done)
   BPlusTree/Proofs/HeapRead.lean -- Phase 2b: get/first/last/range on
                                 --   the heap model (done)
+  BPlusTree/Proofs/HeapLedger.lean -- Phase 2b: clear/Drop and the
+                                --   entry ledger over traces (done)
   Replay/Main.lean, replay.sh   -- Phase 5.1 shape replay (done)
 ```
