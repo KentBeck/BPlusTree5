@@ -182,7 +182,8 @@ impl<K: Ord + Clone, V> BPlusTreeMap<K, V> {
 
     /// Resolve the start bound to the position of the first in-range item.
     /// Lean: `resolveFront_spec` (`Proofs/Read.lean`): the position is the
-    /// number of entries below the start bound.
+    /// number of entries below the start bound; `resolveFrontH_sim`
+    /// (`Proofs/HeapRead.lean`) maps the `(leaf, index)` pair to it.
     unsafe fn resolve_front(&self, start: Bound<&K>) -> Option<(NonNull<u8>, usize)> {
         let Some(k) = bound_key(start) else {
             let leaf = self.leftmost_leaf()?;
@@ -202,7 +203,8 @@ impl<K: Ord + Clone, V> BPlusTreeMap<K, V> {
     }
 
     /// Resolve the end bound to the position one past the last in-range item.
-    /// Lean: `resolveBack_spec`: the number of entries within the end bound.
+    /// Lean: `resolveBack_spec`: the number of entries within the end bound;
+    /// `resolveBackH_sim` on the heap.
     unsafe fn resolve_back(&self, end: Bound<&K>) -> Option<(NonNull<u8>, usize)> {
         let Some(k) = bound_key(end) else {
             let leaf = self.rightmost_leaf()?;
@@ -242,9 +244,9 @@ impl<K: Ord + Clone, V> BPlusTreeMap<K, V> {
 
     /// Lean: `rangeTree_spec` (`Proofs/Read.lean`): the items yielded are
     /// exactly the entries between the bounds, inverted bounds included;
-    /// `itemsTree_spec` for `items`. The model takes the sibling chain to
-    /// list the leaves in tree order, which `check_invariants_detailed`
-    /// verifies.
+    /// `itemsTree_spec` for `items`. On the heap model, `rangeH_sim`
+    /// (`Proofs/HeapRead.lean`): hopping along `next` from the front leaf to
+    /// the back leaf (`drainH_sim`) reads exactly that slice of the entries.
     fn make_items(&self, start: Bound<&K>, end: Bound<&K>) -> Items<'_, K, V> {
         unsafe {
             let (front_leaf, front_idx) = match self.resolve_front(start) {
@@ -316,7 +318,8 @@ impl<K: Ord + Clone, V> BPlusTreeMap<K, V> {
         self.make_items(r.start_bound(), r.end_bound())
     }
 
-    /// Lean: `firstTree_spec` (`Proofs/Read.lean`): the first entry.
+    /// Lean: `firstTree_spec` (`Proofs/Read.lean`): the first entry;
+    /// `firstH_sim` (`Proofs/HeapRead.lean`) on the heap.
     pub fn first(&self) -> Option<(&K, &V)> {
         let leaf = self.leftmost_leaf()?;
         unsafe {
@@ -331,7 +334,8 @@ impl<K: Ord + Clone, V> BPlusTreeMap<K, V> {
         }
     }
 
-    /// Lean: `lastTree_spec` (`Proofs/Read.lean`): the last entry.
+    /// Lean: `lastTree_spec` (`Proofs/Read.lean`): the last entry;
+    /// `lastH_sim` (`Proofs/HeapRead.lean`) on the heap.
     pub fn last(&self) -> Option<(&K, &V)> {
         let leaf = self.rightmost_leaf()?;
         unsafe {

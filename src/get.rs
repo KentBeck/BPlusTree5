@@ -5,7 +5,8 @@ use crate::{BPlusTreeError, BPlusTreeMap, BTreeResult};
 
 impl<K: Ord + Clone, V> BPlusTreeMap<K, V> {
     /// Lean: `getTree_spec` (`Proofs/Read.lean`): `Some(v)` exactly when
-    /// `(key, v)` is one of the tree's entries.
+    /// `(key, v)` is one of the tree's entries; `getH_sim`
+    /// (`Proofs/HeapRead.lean`) for the same descent over node ids.
     pub fn get(&self, key: &K) -> Option<&V> {
         let (parts, idx) = self.leaf_search(key)?;
         unsafe { Some(&*(parts.vals_ptr.add(idx) as *const V)) }

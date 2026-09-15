@@ -254,6 +254,8 @@ impl<K: Ord, V> BPlusTreeMap<K, V> {
     /// Lean: `leafForKey_spec` (`Proofs/Read.lean`): the entries split into
     /// those before this leaf (all below `key`), the leaf, and those after
     /// (all above), so any entry with this key is in the leaf reached.
+    /// Lean: `leafForKeyH_sim` (`Proofs/HeapRead.lean`): the leaf reached
+    /// splits the sibling chain where `leafForKey` splits the entries.
     #[inline(always)]
     pub(crate) fn leaf_for_key(&self, key: &K) -> Option<NonNull<u8>> {
         let mut cur = self.root?;

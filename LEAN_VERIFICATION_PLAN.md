@@ -191,8 +191,18 @@ chain still holds, and outside the subtree only the successor leaf's
 no node leak, and sibling-chain integrity, including `unlink_leaf` and
 freeing the old root.
 
-Not yet proved at this level: the reads, and the value-token accounting
-(no double drop of a `K` / `V`).
+Proved (`lean/BPlusTree/Proofs/HeapRead.lean`, about 800 lines):
+`getH_sim`, `firstH_sim`, `lastH_sim` and `rangeH_sim`. Given `HeapInv`,
+the heap model's reads never fault and return what the tree model
+returns. The bridge is `toList_eq_flat`: a subtree's entries are its
+leaves' contents in sibling-chain order, so `leaf_for_key` lands on the
+leaf that splits the chain where `leafForKey` splits the entries, each
+bound resolves to a `(leaf, index)` pair that is the tree model's
+position, and `Items::next` hopping along `next` from the front leaf to
+the back leaf reads exactly the tree model's slice.
+
+Not yet proved at this level: the value-token accounting (no double
+drop of a `K` / `V`).
 Verifying the Rust source itself for memory safety would be Kani
 (bounded model checking of unsafe Rust), a separate item that
 complements this plan.
@@ -401,5 +411,7 @@ lean/
                                 --   insert simulation (done)
   BPlusTree/Proofs/HeapRemove.lean -- Phase 2b: repairs, root collapse,
                                 --   remove simulation (done)
+  BPlusTree/Proofs/HeapRead.lean -- Phase 2b: get/first/last/range on
+                                --   the heap model (done)
   Replay/Main.lean, replay.sh   -- Phase 5.1 shape replay (done)
 ```

@@ -265,7 +265,27 @@ What is proved for remove (`Proofs/HeapRemove.lean`, about 2,900 lines):
   allocated and is never read again), no node leak (the store's domain
   is exactly the reachable set), and sibling-chain integrity.
 
-Not yet proved at this level: the reads and the value-token accounting.
+What is proved for the reads (`Proofs/HeapRead.lean`, about 800 lines):
+
+- `toList_eq_flat`: a subtree's entries are its leaves' contents in
+  chain order, so positions in `toList` are `(leaf, index)` pairs.
+- `leafForKeyH_sim`, `leftmostLeafH_sim`, `rightmostLeafH_sim`: the leaf
+  each descent reaches splits the chain exactly where the tree model
+  splits the entries.
+- `getH_sim`, `firstH_sim`, `lastH_sim`: given `HeapInv`, the heap
+  model's `get`, `first` and `last` never fault and return what the
+  tree model returns.
+- `resolveFrontH_sim`, `resolveBackH_sim`: the `(leaf, index)` each
+  bound resolves to is the tree model's position, using that every leaf
+  under a branch root is nonempty (`leaves_nonempty`) so a missing
+  `next` / `prev` means no entries on that side.
+- `drainH_sim` and `rangeH_sim`: hopping along `next` from the front leaf
+  to the back leaf reads exactly `(toList.drop f).take (b - f)`, so
+  `range` (and `items`) on the heap model return what the tree model
+  returns. A back leaf before the front leaf cannot happen once the
+  first item passes the end bound, because the chain is sorted.
+
+Not yet proved at this level: the value-token accounting.
 
 Not modelled here: node memory itself, byte offsets, and aliasing, which
 stay with Miri.
