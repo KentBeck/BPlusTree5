@@ -48,6 +48,10 @@ impl<K: Ord + Clone, V> BPlusTreeMap<K, V> {
         self.delete_profile = DeleteProfile::default();
     }
 
+    /// Lean: `removeTree_spec` (`Proofs/Delete.lean`): the returned value was
+    /// stored under `key`, the entries become `eraseSorted key` of the old
+    /// ones, and the tree stays well-formed at the same height or one lower;
+    /// `Map.remove_wf` (`Proofs/Check.lean`) carries `entry_count` along.
     pub fn remove(&mut self, key: &K) -> Option<V> {
         let root = self.root?;
         let mut root_underflowed = false;
@@ -157,6 +161,8 @@ impl<K: Ord + Clone, V> BPlusTreeMap<K, V> {
 
     /// Append every item of `source` onto the end of `target`, leaving
     /// `source` empty. Bulk inverse of the leaf split's item move.
+    /// Lean: `mergeLeafPair_window` (`Proofs/Delete.lean`) shows the two fit
+    /// whenever `plan_rebalance` chose to merge them.
     unsafe fn merge_leaf_into(&mut self, target: NonNull<u8>, source: NonNull<u8>) {
         #[cfg(feature = "delete_profile")]
         {
@@ -193,6 +199,7 @@ impl<K: Ord + Clone, V> BPlusTreeMap<K, V> {
     /// The separator moves down to sit between target's old last child and
     /// source's first child (leaf merges drop it instead: leaf keys carry
     /// their own ordering).
+    /// Lean: `mergeBranchPair_window` (`Proofs/Delete.lean`), likewise.
     unsafe fn merge_branch_into(&mut self, target: NonNull<u8>, separator: K, source: NonNull<u8>) {
         #[cfg(feature = "delete_profile")]
         {
@@ -253,6 +260,8 @@ impl<K: Ord + Clone, V> BPlusTreeMap<K, V> {
     /// decision to `plan_rebalance` and only supply the leaf or branch
     /// flavour of each repair. Returns whether the repair merged two children
     /// and therefore removed one entry from their parent branch.
+    /// Lean: `fixBranchChild_spec` (`Proofs/Delete.lean`) dispatches on
+    /// `planRebalance_spec` to the four leaf repairs' `_window` lemmas.
     unsafe fn rebalance_leaf_child(
         &mut self,
         branch: NonNull<u8>,
@@ -275,6 +284,7 @@ impl<K: Ord + Clone, V> BPlusTreeMap<K, V> {
     }
 
     /// Structural twin of `rebalance_leaf_child`, with the same merge result.
+    /// Lean: the branch half of `fixBranchChild_spec`.
     unsafe fn rebalance_branch_child(
         &mut self,
         branch: NonNull<u8>,
@@ -339,6 +349,8 @@ impl<K: Ord + Clone, V> BPlusTreeMap<K, V> {
     /// as the right child's first key, and the left child's last subtree
     /// travels with it. A pass-through: contrast the leaf rotations, which
     /// re-derive the separator from data.
+    /// Lean: `rotateBranchRight_window` (`Proofs/Delete.lean`): both children
+    /// well-formed afterwards, the new separator strictly between them.
     unsafe fn rotate_branch_right(&mut self, branch: NonNull<u8>, sep_idx: usize) {
         #[cfg(feature = "delete_profile")]
         {
@@ -379,6 +391,7 @@ impl<K: Ord + Clone, V> BPlusTreeMap<K, V> {
     /// Mirror of `rotate_branch_right`: the right child's first key moves up,
     /// the old separator moves down as the left child's last key, and the
     /// right child's first subtree travels with it.
+    /// Lean: `rotateBranchLeft_window`.
     unsafe fn rotate_branch_left(&mut self, branch: NonNull<u8>, sep_idx: usize) {
         #[cfg(feature = "delete_profile")]
         {
@@ -420,6 +433,7 @@ impl<K: Ord + Clone, V> BPlusTreeMap<K, V> {
     /// Merge the two children flanking separator `left_idx`:
     /// `children[left_idx]` absorbs `children[left_idx + 1]`, and the
     /// separator (returned by `remove_branch_entry`) moves down between them.
+    /// Lean: `mergeBranchPair_window`.
     unsafe fn merge_branch_pair(&mut self, branch: NonNull<u8>, left_idx: usize) {
         let parts = layout::carve_branch::<K>(branch, &self.branch_layout);
         let children = parts.children_ptr as *mut *mut u8;
@@ -463,6 +477,7 @@ impl<K: Ord + Clone, V> BPlusTreeMap<K, V> {
     /// child's last item becomes the right child's first. Leaves re-derive
     /// the separator from the right child's new first key (contrast the
     /// branch rotations, which pass the separator through).
+    /// Lean: `rotateLeafRight_window` (`Proofs/Delete.lean`).
     unsafe fn rotate_leaf_right(&mut self, branch: NonNull<u8>, sep_idx: usize) {
         #[cfg(feature = "delete_profile")]
         {
@@ -501,6 +516,7 @@ impl<K: Ord + Clone, V> BPlusTreeMap<K, V> {
     /// Mirror of `rotate_leaf_right`: the right child's first item becomes
     /// the left child's last, and the separator is re-derived from the right
     /// child's new first key.
+    /// Lean: `rotateLeafLeft_window`.
     unsafe fn rotate_leaf_left(&mut self, branch: NonNull<u8>, sep_idx: usize) {
         #[cfg(feature = "delete_profile")]
         {
@@ -539,6 +555,7 @@ impl<K: Ord + Clone, V> BPlusTreeMap<K, V> {
     /// Merge the two children flanking separator `left_idx`:
     /// `children[left_idx]` absorbs `children[left_idx + 1]`. Leaf keys carry
     /// their own ordering, so the separator is redundant and dropped.
+    /// Lean: `mergeLeafPair_window`.
     unsafe fn merge_leaf_pair(&mut self, branch: NonNull<u8>, left_idx: usize) {
         let parts = layout::carve_branch::<K>(branch, &self.branch_layout);
         let children = parts.children_ptr as *mut *mut u8;
@@ -569,6 +586,8 @@ impl<K: Ord + Clone, V> BPlusTreeMap<K, V> {
 
     /// Remove below `node`; on success, also report whether `node` became
     /// underfull and therefore needs repair by its parent.
+    /// Lean: `removeRec_spec` (`Proofs/Delete.lean`): below the root the node
+    /// is at most one short of minimum fill, and the flag is exact.
     unsafe fn remove_rec(
         &mut self,
         node: NonNull<u8>,
@@ -592,6 +611,7 @@ impl<K: Ord + Clone, V> BPlusTreeMap<K, V> {
         }
     }
 
+    /// Lean: `leafRemove_spec` (`Proofs/Delete.lean`).
     unsafe fn leaf_remove(&mut self, leaf: NonNull<u8>, key: &K) -> Option<V> {
         let parts = layout::carve_leaf::<K, V>(leaf, &self.leaf_layout);
         let len = (*parts.hdr).len as usize;

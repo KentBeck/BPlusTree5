@@ -258,8 +258,9 @@ In this order, because difficulty rises sharply:
    first, last, and range with random bounds), about 120k queries per
    run, answered by the model's read functions; the whole replay takes
    about sixteen seconds.
-2. Cite proofs from the code: a one-line comment at each Rust site that
-   a lemma justifies (split arithmetic, merge fit, the depth bound).
+2. ~~Cite proofs from the code~~ — DONE. Every Rust function a lemma
+   speaks to carries a `Lean:` line in its doc comment naming the lemma
+   and what it establishes there (`grep -rn 'Lean:' src`).
 3. ~~Add the uniform-depth check to `check_invariants_detailed`~~ — DONE.
    `validate_node` returns the subtree height (it used to return a
    min/max key range that nothing read) and `validate_branch` rejects

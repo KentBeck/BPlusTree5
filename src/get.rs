@@ -4,6 +4,8 @@ use crate::layout;
 use crate::{BPlusTreeError, BPlusTreeMap, BTreeResult};
 
 impl<K: Ord + Clone, V> BPlusTreeMap<K, V> {
+    /// Lean: `getTree_spec` (`Proofs/Read.lean`): `Some(v)` exactly when
+    /// `(key, v)` is one of the tree's entries.
     pub fn get(&self, key: &K) -> Option<&V> {
         let (parts, idx) = self.leaf_search(key)?;
         unsafe { Some(&*(parts.vals_ptr.add(idx) as *const V)) }
@@ -37,6 +39,7 @@ impl<K: Ord + Clone, V> BPlusTreeMap<K, V> {
         Ok(out)
     }
 
+    /// Lean: `leafSearch_some` and `leafSearch_none` (`Proofs/Read.lean`).
     pub(crate) fn leaf_search(&self, key: &K) -> Option<(layout::LeafParts<K, V>, usize)> {
         let leaf = self.leaf_for_key(key)?;
         unsafe {

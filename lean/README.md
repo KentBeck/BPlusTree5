@@ -94,6 +94,9 @@ link a reviewer checks by eye.
 | `check_invariants_detailed`, `validate_node` / `validate_leaf` / `validate_branch`, `observe_leaf`, `ValidationState` | `checkInvariants`, `validateNode` / `validateLeaf` / `validateChildren`, `observeLeaf`, `VState` (`Model/Check.lean`) | `checkInvariants_iff`: accepts exactly `WF` trees with the right stored length |
 | `BPlusTreeMap` with `entry_count`, `insert` / `remove` / `len` | `Map`, `Map.insert` / `Map.remove` / `Map.len` | `Map.insert_wf`, `Map.remove_wf`: the stored length stays `toList.length` |
 
+Each Rust site a lemma justifies carries a `Lean:` line in its doc
+comment naming the lemma; `grep -rn 'Lean:' src` lists them all.
+
 What the two main theorems say, given a sorted leaf within capacity:
 
 - `NoSplit`: the leaf stays sorted and within capacity. If a value is

@@ -181,6 +181,8 @@ impl<K: Ord + Clone, V> BPlusTreeMap<K, V> {
     }
 
     /// Resolve the start bound to the position of the first in-range item.
+    /// Lean: `resolveFront_spec` (`Proofs/Read.lean`): the position is the
+    /// number of entries below the start bound.
     unsafe fn resolve_front(&self, start: Bound<&K>) -> Option<(NonNull<u8>, usize)> {
         let Some(k) = bound_key(start) else {
             let leaf = self.leftmost_leaf()?;
@@ -200,6 +202,7 @@ impl<K: Ord + Clone, V> BPlusTreeMap<K, V> {
     }
 
     /// Resolve the end bound to the position one past the last in-range item.
+    /// Lean: `resolveBack_spec`: the number of entries within the end bound.
     unsafe fn resolve_back(&self, end: Bound<&K>) -> Option<(NonNull<u8>, usize)> {
         let Some(k) = bound_key(end) else {
             let leaf = self.rightmost_leaf()?;
@@ -223,6 +226,7 @@ impl<K: Ord + Clone, V> BPlusTreeMap<K, V> {
     /// into those before `k` and those after. With `after_equal` an exact
     /// match falls before the cut, otherwise after it. Returns
     /// `(leaf, cut, len)`; the cut may equal 0 or `len`.
+    /// Lean: `cutInLeaf_spec`: the cut counts the leaf's keys on one side.
     unsafe fn cut_in_leaf(&self, k: &K, after_equal: bool) -> Option<(NonNull<u8>, usize, usize)> {
         let leaf = self.leaf_for_key(k)?;
         let parts = layout::carve_leaf::<K, V>(leaf, &self.leaf_layout);
@@ -236,6 +240,11 @@ impl<K: Ord + Clone, V> BPlusTreeMap<K, V> {
         Some((leaf, cut, len))
     }
 
+    /// Lean: `rangeTree_spec` (`Proofs/Read.lean`): the items yielded are
+    /// exactly the entries between the bounds, inverted bounds included;
+    /// `itemsTree_spec` for `items`. The model takes the sibling chain to
+    /// list the leaves in tree order, which `check_invariants_detailed`
+    /// verifies.
     fn make_items(&self, start: Bound<&K>, end: Bound<&K>) -> Items<'_, K, V> {
         unsafe {
             let (front_leaf, front_idx) = match self.resolve_front(start) {
@@ -307,6 +316,7 @@ impl<K: Ord + Clone, V> BPlusTreeMap<K, V> {
         self.make_items(r.start_bound(), r.end_bound())
     }
 
+    /// Lean: `firstTree_spec` (`Proofs/Read.lean`): the first entry.
     pub fn first(&self) -> Option<(&K, &V)> {
         let leaf = self.leftmost_leaf()?;
         unsafe {
@@ -321,6 +331,7 @@ impl<K: Ord + Clone, V> BPlusTreeMap<K, V> {
         }
     }
 
+    /// Lean: `lastTree_spec` (`Proofs/Read.lean`): the last entry.
     pub fn last(&self) -> Option<(&K, &V)> {
         let leaf = self.rightmost_leaf()?;
         unsafe {

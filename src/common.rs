@@ -231,6 +231,9 @@ impl<K, V> BPlusTreeMap<K, V> {
 }
 
 impl<K: Ord, V> BPlusTreeMap<K, V> {
+    /// The child after the separators `<= key`. Lean: `lastChild` of the
+    /// `sepLE` prefix, the descent `insertRec`, `removeRec` and `leafForKey`
+    /// share; `front_lt_of_route` (`Proofs/Tree.lean`) is what it guarantees.
     #[inline(always)]
     pub(crate) unsafe fn child_for_key(
         &self,
@@ -248,6 +251,9 @@ impl<K: Ord, V> BPlusTreeMap<K, V> {
         NonNull::new(child_ptr).map(|child| (child, child_idx))
     }
 
+    /// Lean: `leafForKey_spec` (`Proofs/Read.lean`): the entries split into
+    /// those before this leaf (all below `key`), the leaf, and those after
+    /// (all above), so any entry with this key is in the leaf reached.
     #[inline(always)]
     pub(crate) fn leaf_for_key(&self, key: &K) -> Option<NonNull<u8>> {
         let mut cur = self.root?;
@@ -268,6 +274,8 @@ impl<K: Ord, V> BPlusTreeMap<K, V> {
         }
     }
 
+    /// Lean: `leftmostLeaf_spec` (`Proofs/Read.lean`): it starts the entry
+    /// list and is nonempty unless it is the root.
     #[inline]
     pub(crate) fn leftmost_leaf(&self) -> Option<NonNull<u8>> {
         let mut cur = self.root?;
@@ -291,6 +299,7 @@ impl<K: Ord, V> BPlusTreeMap<K, V> {
 }
 
 impl<K: Ord + Clone, V> BPlusTreeMap<K, V> {
+    /// Lean: `rightmostLeaf_spec` (`Proofs/Read.lean`), the mirror image.
     #[inline]
     pub(crate) fn rightmost_leaf(&self) -> Option<NonNull<u8>> {
         let mut cur = self.root?;
@@ -574,12 +583,16 @@ impl<K: Ord + Clone, V> BPlusTreeMap<K, V> {
         Ok(depth.map_or(0, |d| d + 1))
     }
 
+    /// Lean: `minLeafLen`, the leaf fill `WF` requires below the root.
     #[inline(always)]
     pub(crate) fn min_leaf_len(&self) -> usize {
         let cap = self.leaf_layout.cap as usize;
         cap / 2
     }
 
+    /// Lean: `minBranchLen_eq` (`Proofs/Delete.lean`): for `cap >= 3` this is
+    /// `cap / 2`, the branch fill `WF` requires; `with_caps` enforces 4, so
+    /// the `cap <= 2` arm is unreachable.
     #[inline(always)]
     pub(crate) fn min_branch_len(&self) -> usize {
         let cap = self.branch_layout.cap as usize;

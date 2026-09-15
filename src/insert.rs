@@ -15,6 +15,10 @@ pub(crate) enum InsertResult<K, V> {
 }
 
 impl<K: Ord + Clone, V> BPlusTreeMap<K, V> {
+    /// Lean: `insertTree_wf` and `insertTree_toList` (`Proofs/Tree.lean`): the
+    /// tree stays well-formed, its entries become `insertSorted k v` of the
+    /// old ones, and the returned value is the one stored under `key`;
+    /// `Map.insert_wf` (`Proofs/Check.lean`) carries `entry_count` along.
     pub fn insert(&mut self, key: K, value: V) -> Option<V> {
         let old_value = self.insert_inner(key, value);
         if old_value.is_none() {
@@ -51,6 +55,8 @@ impl<K: Ord + Clone, V> BPlusTreeMap<K, V> {
     /// on the way down, repair on the way up. Depth is logarithmic in the
     /// entry count (non-root branches hold at least two keys), so the
     /// recursion is shallow.
+    /// Lean: `insertRec_wf` and `insertRec_toList` (`Proofs/Tree.lean`), with
+    /// `front_lt_of_route` for the descent through `child_for_key`.
     unsafe fn insert_rec(&mut self, node: NonNull<u8>, key: K, value: V) -> InsertResult<K, V> {
         let hdr = &*(node.as_ptr() as *const NodeHdr);
         match hdr.tag {
@@ -71,6 +77,8 @@ impl<K: Ord + Clone, V> BPlusTreeMap<K, V> {
 
     /// Replace the root with a new branch holding `sep_key` between the old
     /// root and `right`. Inverse of `replace_root` in delete.
+    /// Lean: `growRoot_spec` (`Proofs/Branch.lean`); `insertTree_wf` shows the
+    /// result well-formed one level higher.
     unsafe fn grow_root(&mut self, old_root: NonNull<u8>, sep_key: K, right: NonNull<u8>) {
         let branch = alloc_branch_block(&self.branch_layout).expect("alloc new root branch");
         let b = layout::carve_branch::<K>(branch, &self.branch_layout);
@@ -92,6 +100,9 @@ impl<K: Ord + Clone, V> BPlusTreeMap<K, V> {
 
     /// Absorb a child split into `node` at `child_idx`: insert the separator
     /// and right-sibling pointer, splitting this branch too if it is full.
+    /// Lean: `branchApplySplit_noSplit` and `branchApplySplit_split`
+    /// (`Proofs/Branch.lean`); the separator fits strictly between its
+    /// neighbours by `sepFits_of_strict` (`Proofs/Tree.lean`).
     unsafe fn branch_apply_split(
         &mut self,
         node: NonNull<u8>,
@@ -116,6 +127,10 @@ impl<K: Ord + Clone, V> BPlusTreeMap<K, V> {
         }
     }
 
+    /// Lean: `cutInsert_eq` (`Proofs/Branch.lean`) shows the `left_keep`
+    /// arithmetic below equals "insert, then cut at `(len + 1) / 2`", and
+    /// `branchApplySplit_split` gives both halves between `cap / 2` and `cap`
+    /// with the promoted key strictly between them, for every `cap >= 1`.
     unsafe fn branch_insert_and_split(
         &mut self,
         node: NonNull<u8>,
@@ -208,6 +223,9 @@ impl<K: Ord + Clone, V> BPlusTreeMap<K, V> {
         );
         (*parts.hdr).len = (cur_len + 1) as u16;
     }
+    /// Lean: `leafInsertOrSplit_noSplit` and `leafInsertOrSplit_split`
+    /// (`Proofs/Leaf.lean`) for the shapes; `leafInsertOrSplit_noSplit_eq` and
+    /// `leafInsertOrSplit_split_eq` (`Proofs/Spec.lean`) for the entries.
     unsafe fn leaf_insert_or_split(
         &mut self,
         leaf: NonNull<u8>,
@@ -258,6 +276,8 @@ impl<K: Ord + Clone, V> BPlusTreeMap<K, V> {
     /// so both halves meet the minimum fill for every capacity. Returns the
     /// new sibling and the separator, its first key. Inverse of
     /// `merge_leaf_into`.
+    /// Lean: `leafSplit_*` and `leafInsertOrSplit_split` (`Proofs/Leaf.lean`):
+    /// both halves hold between `cap / 2` and `cap` items for every `cap >= 2`.
     unsafe fn split_leaf(&mut self, leaf: NonNull<u8>) -> (NonNull<u8>, K) {
         let l = layout::carve_leaf::<K, V>(leaf, &self.leaf_layout);
         let len = (*l.hdr).len as usize;
