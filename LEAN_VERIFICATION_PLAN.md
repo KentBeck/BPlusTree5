@@ -220,10 +220,14 @@ In this order, because difficulty rises sharply:
 
 ## Phase 5 — tie it back to the Rust
 
-1. Compile the model (`lake exe`) and replay the differential fuzz op
-   traces through it, comparing `toList` after every op with the Rust
-   tree's `items()`. Deterministic seeds make this a fixed test, not a
-   fuzz run.
+1. ~~Compile the model (`lake exe`) and replay op traces through it~~ —
+   DONE for insert (`lean/replay.sh`, `examples/gen_trace.rs`,
+   `lean/Replay/Main.lean`). The comparison is on the tree *shape*
+   (`dump_shape`: every leaf's entries and every separator, nested), not
+   just the map, at every dump across eight capacity/key-space
+   configurations; 99k inserts and 19k shape checks run in about six
+   seconds. CI runs it on every push. Extend the trace format with
+   `R k` and `G k` as the model gains `remove` and `get`.
 2. Cite proofs from the code: a one-line comment at each Rust site that
    a lemma justifies (split arithmetic, merge fit, the depth bound).
 3. Add the uniform-depth check to `check_invariants_detailed` (cheap:
@@ -303,5 +307,5 @@ lean/
   BPlusTree/Proofs/Remove.lean  -- Phase 4.4
   BPlusTree/Proofs/Depth.lean   -- finding 1
   BPlusTree/Proofs/Heap.lean    -- Phase 2b theorems
-  Replay/Main.lean              -- Phase 5.1 executable
+  Replay/Main.lean, replay.sh   -- Phase 5.1 shape replay (done)
 ```

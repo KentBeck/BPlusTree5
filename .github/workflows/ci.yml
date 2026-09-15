@@ -65,3 +65,9 @@ jobs:
         with:
           lake-package-directory: lean
           test: false
+      # Replay: generate insert traces from the Rust tree and check that
+      # the Lean model produces the same tree shape at every dump.
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Replay Rust traces through the Lean model
+        run: ./lean/replay.sh

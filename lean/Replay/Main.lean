@@ -1,0 +1,78 @@
+import BPlusTree
+
+/-!
+# Replay harness
+
+Reads traces written by `examples/gen_trace.rs`, replays every operation
+through the Lean model, and compares the model's shape with the Rust
+tree's shape at every dump line. Equal shapes at every dump across the
+fuzz configurations is the evidence that the model is the code: same
+splits, same separators, same leaf contents, not just the same map.
+
+Trace format (one op or dump per line):
+
+    CAPS <leaf_cap> <branch_cap>
+    I <key> <value>
+    = <shape>
+
+Shapes: a leaf is `(k:v k:v ...)`, a branch is `[child sep child ...]`.
+-/
+
+open BPlusTree
+
+/-- The same rendering as the Rust `dump_shape`. -/
+partial def shape : Node Int Int → String
+  | .leaf kvs => "(" ++ " ".intercalate (kvs.map fun (k, v) => s!"{k}:{v}") ++ ")"
+  | .branch c0 entries =>
+    "[" ++ shape c0 ++ String.join (entries.map fun (s, c) => s!" {s} " ++ shape c) ++ "]"
+
+structure Outcome where
+  ok : Bool
+  ops : Nat
+  checks : Nat
+
+def replayFile (path : System.FilePath) : IO Outcome := do
+  let content ← IO.FS.readFile path
+  let mut root : Node Int Int := .leaf []
+  let mut lc := 0
+  let mut bc := 0
+  let mut ops := 0
+  let mut checks := 0
+  let mut lineNo := 0
+  for line in content.splitOn "\n" do
+    lineNo := lineNo + 1
+    match line.splitOn " " with
+    | ["CAPS", l, b] =>
+      lc := l.toNat!
+      bc := b.toNat!
+    | ["I", k, v] =>
+      root := (insertTree lc bc root k.toInt! v.toInt!).1
+      ops := ops + 1
+    | "=" :: rest =>
+      let expected := " ".intercalate rest
+      let got := shape root
+      if got == expected then
+        checks := checks + 1
+      else
+        IO.eprintln s!"{path}:{lineNo}: shape mismatch after {ops} ops"
+        IO.eprintln s!"  rust: {expected}"
+        IO.eprintln s!"  lean: {got}"
+        return { ok := false, ops, checks }
+    | [""] => pure ()
+    | _ =>
+      IO.eprintln s!"{path}:{lineNo}: unparsed line: {line}"
+      return { ok := false, ops, checks }
+  return { ok := true, ops, checks }
+
+def main (args : List String) : IO UInt32 := do
+  if args.isEmpty then
+    IO.eprintln "usage: replay <trace>..."
+    return 2
+  let mut failed := false
+  for path in args do
+    let r ← replayFile path
+    if r.ok then
+      IO.println s!"{path}: OK ({r.ops} ops, {r.checks} shape checks)"
+    else
+      failed := true
+  return if failed then 1 else 0

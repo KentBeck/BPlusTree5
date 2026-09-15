@@ -613,3 +613,56 @@ mod tests {
         );
     }
 }
+
+#[cfg(feature = "compat_test_api")]
+impl<K: Ord + Clone + core::fmt::Debug, V: core::fmt::Debug> BPlusTreeMap<K, V> {
+    /// Render the tree's shape for the Lean replay harness (`lean/Replay`).
+    /// A leaf is `(k:v k:v ...)`; a branch is `[child sep child sep child]`
+    /// with the children rendered recursively. The Lean model renders its
+    /// tree the same way, so equal strings mean equal shapes.
+    pub fn dump_shape(&self) -> String {
+        let mut out = String::new();
+        match self.root {
+            Some(root) => unsafe { self.dump_node(root, &mut out) },
+            None => out.push_str("()"),
+        }
+        out
+    }
+
+    unsafe fn dump_node(&self, node: NonNull<u8>, out: &mut String) {
+        use core::fmt::Write;
+        let hdr = &*(node.as_ptr() as *const NodeHdr);
+        match hdr.tag {
+            NodeTag::Leaf => {
+                let parts = layout::carve_leaf::<K, V>(node, &self.leaf_layout);
+                let len = (*parts.hdr).len as usize;
+                out.push('(');
+                for i in 0..len {
+                    if i > 0 {
+                        out.push(' ');
+                    }
+                    let k = &*(parts.keys_ptr.add(i) as *const K);
+                    let v = &*(parts.vals_ptr.add(i) as *const V);
+                    let _ = write!(out, "{:?}:{:?}", k, v);
+                }
+                out.push(')');
+            }
+            NodeTag::Branch => {
+                let parts = layout::carve_branch::<K>(node, &self.branch_layout);
+                let len = (*parts.hdr).len as usize;
+                out.push('[');
+                for i in 0..=len {
+                    if i > 0 {
+                        let k = &*(parts.keys_ptr.add(i - 1) as *const K);
+                        let _ = write!(out, " {:?} ", k);
+                    }
+                    match NonNull::new(*(parts.children_ptr.add(i) as *const *mut u8)) {
+                        Some(child) => self.dump_node(child, out),
+                        None => out.push_str("null"),
+                    }
+                }
+                out.push(']');
+            }
+        }
+    }
+}

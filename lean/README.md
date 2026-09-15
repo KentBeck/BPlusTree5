@@ -8,6 +8,23 @@ where the phases land.
 Build with `lake build` (toolchain pinned in `lean-toolchain`; no Mathlib,
 only core `Std`). CI runs it on every push.
 
+## Replay
+
+`./lean/replay.sh` (from the repo root) builds `examples/gen_trace.rs`,
+runs eight insert-only configurations against the Rust tree (leaf and
+branch capacities from 4×4 to 32×256, key spaces from heavy-duplicate to
+sparse), writes each operation and, at intervals, the tree's shape as
+`dump_shape` renders it, then runs `lake exe replay` on the traces. The
+Lean side replays every operation through `insertTree` and renders its
+tree the same way; any shape difference, at any dump, fails the run with
+the first divergent shape from each side. CI runs it on every push.
+
+A shape match is stronger than the differential fuzz's map comparison:
+it checks the same splits, the same separators, and the same leaf
+contents, so it is the evidence that the model is the code and not just
+a model of the same map. Traces cover insert only until the model has
+`remove`.
+
 ## Correspondence
 
 Each model definition mirrors one Rust function by name and keeps its
@@ -35,6 +52,7 @@ link a reviewer checks by eye.
 | `insert_rec` | `insertRec` | `insertRec_wf` |
 | `insert` (with root growth) | `insertTree` | `insertTree_wf` |
 | `check_invariants_detailed` bounds, order, fill; plus uniform leaf depth | `WF` (`Proofs/Tree.lean`) | preserved by insert |
+| `dump_shape` (test-only, `compat_test_api`) | `shape` (`Replay/Main.lean`) | compared on every replayed trace |
 | the leaves' entries left to right (what `items()` yields) | `Node.toList` (`Model/Tree.lean`) | `insertTree_toList`: insert = `insertSorted` on it |
 | sorted-association-list insert (the spec) | `insertSorted` (`Model/Spec.lean`) | |
 
