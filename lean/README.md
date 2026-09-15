@@ -91,6 +91,8 @@ link a reviewer checks by eye.
 | `leftmost_leaf`, `first` / `rightmost_leaf`, `last` | `leftmostLeaf`, `firstTree` / `rightmostLeaf`, `lastTree` | `firstTree_spec`, `lastTree_spec`: head and last of `toList` |
 | `Bound`, `cut_in_leaf`, `resolve_front`, `resolve_back`, `make_items`, `range`, `items` | `Bound` (`Model/Spec.lean`), `cutInLeaf`, `resolveFront`, `resolveBack`, `makeItems`, `rangeTree`, `itemsTree` | `rangeTree_spec`, `itemsTree_spec` |
 | the entries between two bounds (the spec) | `rangeSorted` (`Model/Spec.lean`) | |
+| `check_invariants_detailed`, `validate_node` / `validate_leaf` / `validate_branch`, `observe_leaf`, `ValidationState` | `checkInvariants`, `validateNode` / `validateLeaf` / `validateChildren`, `observeLeaf`, `VState` (`Model/Check.lean`) | `checkInvariants_iff`: accepts exactly `WF` trees with the right stored length |
+| `BPlusTreeMap` with `entry_count`, `insert` / `remove` / `len` | `Map`, `Map.insert` / `Map.remove` / `Map.len` | `Map.insert_wf`, `Map.remove_wf`: the stored length stays `toList.length` |
 
 What the two main theorems say, given a sorted leaf within capacity:
 
@@ -179,5 +181,18 @@ What the read theorems say, for a well-formed tree (`Proofs/Read.lean`):
   between them is the spec. The only fact about the sibling chain the
   model relies on is that it lists the leaves in tree order, which the
   Rust invariant checker verifies.
+
+What the checker theorem says (`Proofs/Check.lean`): `Model/Check.lean`
+mirrors `check_invariants_detailed` arm for arm, threading its
+`ValidationState` (entries counted, last key seen) and returning each
+subtree's height, which `validate_branch` now requires every child to
+agree on. `checkInvariants_iff` states that the checker accepts a tree
+with stored length `count` exactly when the tree is `WF` at some height
+and `count` is its number of entries. So the runtime checker, which the
+fuzzers run after every mutation, tests precisely the invariant the
+proofs preserve, `len()` included: `Map.insert_wf` and `Map.remove_wf`
+carry `entry_count` along with the tree. Not mirrored: the two
+sibling-pointer checks, which have no counterpart in a pointer-free
+model; the replay's range queries are what exercises them.
 
 Not modelled here: node memory and the sibling pointers themselves.

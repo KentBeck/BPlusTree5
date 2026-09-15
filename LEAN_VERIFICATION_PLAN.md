@@ -260,8 +260,17 @@ In this order, because difficulty rises sharply:
    about sixteen seconds.
 2. Cite proofs from the code: a one-line comment at each Rust site that
    a lemma justifies (split arithmetic, merge fit, the depth bound).
-3. Add the uniform-depth check to `check_invariants_detailed` (cheap:
-   return depth from `validate_node` and compare across children).
+3. ~~Add the uniform-depth check to `check_invariants_detailed`~~ — DONE.
+   `validate_node` returns the subtree height (it used to return a
+   min/max key range that nothing read) and `validate_branch` rejects
+   children at different heights; a unit test splices a leaf in at a
+   branch's depth to see the error fire. At the same time the checker
+   stopped accepting a root branch with no keys, a state the tree never
+   produces (root collapse hands a lone child over) but which `WF`
+   rejects. `Model/Check.lean` mirrors the checker arm for arm and
+   `checkInvariants_iff` (`Proofs/Check.lean`) shows it accepts exactly
+   the `WF` trees whose stored length is `toList.length`; `Map.insert_wf`
+   / `Map.remove_wf` carry `entry_count` through insert and remove.
 
 ## Concrete findings the plan already produced
 

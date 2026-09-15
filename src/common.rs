@@ -11,12 +11,6 @@ pub(crate) struct ValidationState<K> {
     pub(crate) prev_key: Option<K>,
 }
 
-/// Smallest and largest data key contained in a validated subtree.
-pub(crate) struct KeyRange<K> {
-    min: K,
-    max: K,
-}
-
 impl<K: Ord + Clone> ValidationState<K> {
     /// Check this leaf's keys against the leaf visited immediately before it,
     /// then make it the reference point for the next leaf in traversal order.
@@ -350,6 +344,14 @@ impl<K: Ord + Clone, V> BPlusTreeMap<K, V> {
         self.check_invariants_detailed().is_ok()
     }
 
+    /// Check the structural invariant: every node within capacity and, below
+    /// the root, at or above minimum fill; keys strictly increasing in every
+    /// node and inside the bounds the ancestors' separators impose; every
+    /// leaf at the same depth; the leaf sibling chain in tree order; and the
+    /// stored length equal to the number of entries. `checkInvariants` in
+    /// `lean/BPlusTree/Model/Check.lean` mirrors it arm for arm (minus the
+    /// pointer checks) and `checkInvariants_iff` proves it accepts exactly
+    /// the trees the model's `WF` describes.
     pub fn check_invariants_detailed(&self) -> Result<(), String> {
         let mut state = ValidationState {
             total_items: 0,
@@ -381,6 +383,8 @@ impl<K: Ord + Clone, V> BPlusTreeMap<K, V> {
         Ok(())
     }
 
+    /// Validate a subtree and return its height: 0 for a leaf, one more than
+    /// its children for a branch, all of whose children must agree.
     pub(crate) unsafe fn validate_node(
         &self,
         node: NonNull<u8>,
@@ -388,7 +392,7 @@ impl<K: Ord + Clone, V> BPlusTreeMap<K, V> {
         upper: Option<&K>,
         is_root: bool,
         state: &mut ValidationState<K>,
-    ) -> Result<Option<KeyRange<K>>, String> {
+    ) -> Result<usize, String> {
         let hdr = &*(node.as_ptr() as *const NodeHdr);
         match hdr.tag {
             NodeTag::Leaf => self.validate_leaf(node, lower, upper, is_root, state),
@@ -403,23 +407,19 @@ impl<K: Ord + Clone, V> BPlusTreeMap<K, V> {
         upper: Option<&K>,
         is_root: bool,
         state: &mut ValidationState<K>,
-    ) -> Result<Option<KeyRange<K>>, String> {
+    ) -> Result<usize, String> {
         let parts = layout::carve_leaf::<K, V>(leaf, &self.leaf_layout);
         let len = (*parts.hdr).len as usize;
         self.validate_leaf_occupancy(len, is_root)?;
         if len == 0 {
-            return Ok(None);
+            return Ok(0);
         }
 
         let keys = core::slice::from_raw_parts(parts.keys_ptr as *const K, len);
         self.validate_leaf_key_order_and_bounds(keys, lower, upper)?;
         self.validate_leaf_chain_position(leaf, parts.prev_ptr, state.prev_leaf)?;
         state.observe_leaf(leaf, keys)?;
-
-        Ok(Some(KeyRange {
-            min: keys[0].clone(),
-            max: keys[len - 1].clone(),
-        }))
+        Ok(0)
     }
 
     fn validate_leaf_occupancy(&self, len: usize, is_root: bool) -> Result<(), String> {
@@ -503,7 +503,7 @@ impl<K: Ord + Clone, V> BPlusTreeMap<K, V> {
         upper: Option<&K>,
         is_root: bool,
         state: &mut ValidationState<K>,
-    ) -> Result<Option<KeyRange<K>>, String> {
+    ) -> Result<usize, String> {
         let parts = layout::carve_branch::<K>(branch, &self.branch_layout);
         let len = (*parts.hdr).len as usize;
         let cap = self.branch_layout.cap as usize;
@@ -512,14 +512,14 @@ impl<K: Ord + Clone, V> BPlusTreeMap<K, V> {
             return Err(format!("Branch has {} keys but capacity is {}", len, cap));
         }
 
+        // A root branch always has a separator too: root collapse hands a
+        // lone child over instead of keeping a one-child root.
         if len == 0 {
-            if !is_root {
-                return Err("Non-root branch has no keys".into());
-            }
-            let child_ptr = *(parts.children_ptr as *const *mut u8);
-            if child_ptr.is_null() {
-                return Ok(None);
-            }
+            return Err(if is_root {
+                "Root branch has no keys".into()
+            } else {
+                "Non-root branch has no keys".into()
+            });
         }
 
         let min_required = self.min_branch_len();
@@ -538,19 +538,19 @@ impl<K: Ord + Clone, V> BPlusTreeMap<K, V> {
         }
 
         if let Some(low) = lower {
-            if len > 0 && keys[0] < *low {
+            if keys[0] < *low {
                 return Err("Branch keys fall below lower bound".into());
             }
         }
         if let Some(high) = upper {
-            if len > 0 && keys[len - 1] >= *high {
+            if keys[len - 1] >= *high {
                 return Err("Branch keys exceed upper bound".into());
             }
         }
 
-        let mut subtree_min: Option<K> = None;
-        let mut subtree_max: Option<K> = None;
-
+        // Every child sits at the same height, so every leaf is at the
+        // same depth (the model's `WF` builds this in as its height index).
+        let mut depth: Option<usize> = None;
         for i in 0..=len {
             let child_ptr = *(parts.children_ptr.add(i) as *const *mut u8);
             let child = match NonNull::new(child_ptr) {
@@ -561,22 +561,17 @@ impl<K: Ord + Clone, V> BPlusTreeMap<K, V> {
             let lower_bound = if i == 0 { lower } else { Some(&keys[i - 1]) };
             let upper_bound = if i == len { upper } else { Some(&keys[i]) };
 
-            if let Some(KeyRange {
-                min: child_min,
-                max: child_max,
-            }) = self.validate_node(child, lower_bound, upper_bound, false, state)?
-            {
-                if subtree_min.is_none() {
-                    subtree_min = Some(child_min.clone());
+            let child_depth = self.validate_node(child, lower_bound, upper_bound, false, state)?;
+            match depth {
+                None => depth = Some(child_depth),
+                Some(d) if d != child_depth => {
+                    return Err("Leaves at different depths".into());
                 }
-                subtree_max = Some(child_max);
+                Some(_) => {}
             }
         }
 
-        Ok(match (subtree_min, subtree_max) {
-            (Some(min), Some(max)) => Some(KeyRange { min, max }),
-            _ => None,
-        })
+        Ok(depth.map_or(0, |d| d + 1))
     }
 
     #[inline(always)]
@@ -611,6 +606,72 @@ mod tests {
             tree.check_invariants_detailed().unwrap_err(),
             "Stored length is 2, but the leaf entry count is 1"
         );
+    }
+
+    /// Replace the root's first child (a branch) with a leaf spliced into the
+    /// sibling chain so that every other check passes: only the depth check
+    /// can reject it.
+    #[test]
+    fn validation_rejects_leaves_at_different_depths() {
+        use crate::{alloc_leaf_block, free_leaf_block, layout, NodeHdr, NodeTag};
+
+        let mut tree = BPlusTreeMap::<i64, i64>::with_caps(4, 4).unwrap();
+        for k in 0..64 {
+            tree.insert(k, k);
+        }
+        assert!(tree.check_invariants());
+
+        unsafe {
+            let root = tree.root.unwrap();
+            let rp = layout::carve_branch::<i64>(root, &tree.branch_layout);
+            assert_eq!((*rp.hdr).tag, NodeTag::Branch);
+            let child0 = *(rp.children_ptr as *const *mut u8);
+            assert_eq!(
+                (*(child0 as *const NodeHdr)).tag,
+                NodeTag::Branch,
+                "the test needs a tree of height at least 2"
+            );
+
+            // The first leaf under the root's second child: the leaf that
+            // will follow the fake one in traversal order.
+            let mut cur = *(rp.children_ptr.add(1) as *const *mut u8);
+            while (*(cur as *const NodeHdr)).tag == NodeTag::Branch {
+                let bp = layout::carve_branch::<i64>(
+                    core::ptr::NonNull::new_unchecked(cur),
+                    &tree.branch_layout,
+                );
+                cur = *(bp.children_ptr as *const *mut u8);
+            }
+            let next_leaf = core::ptr::NonNull::new_unchecked(cur);
+            let np = layout::carve_leaf::<i64, i64>(next_leaf, &tree.leaf_layout);
+            let saved_prev = np.prev_ptr.map(|p| *p);
+
+            // A leaf with two keys below every real key, at minimum fill,
+            // linked ahead of `next_leaf`.
+            let fake = alloc_leaf_block(&tree.leaf_layout).unwrap();
+            let fp = layout::carve_leaf::<i64, i64>(fake, &tree.leaf_layout);
+            core::ptr::write(fp.keys_ptr as *mut i64, -2);
+            core::ptr::write((fp.keys_ptr as *mut i64).add(1), -1);
+            core::ptr::write(fp.vals_ptr as *mut i64, 0);
+            core::ptr::write((fp.vals_ptr as *mut i64).add(1), 0);
+            (*fp.hdr).len = 2;
+            *fp.next_ptr = next_leaf.as_ptr();
+            if let Some(prev) = np.prev_ptr {
+                *prev = fake.as_ptr();
+            }
+            *(rp.children_ptr as *mut *mut u8) = fake.as_ptr();
+
+            let err = tree.check_invariants_detailed().unwrap_err();
+
+            *(rp.children_ptr as *mut *mut u8) = child0;
+            if let (Some(prev), Some(saved)) = (np.prev_ptr, saved_prev) {
+                *prev = saved;
+            }
+            free_leaf_block(fake, &tree.leaf_layout);
+
+            assert_eq!(err, "Leaves at different depths");
+        }
+        assert!(tree.check_invariants());
     }
 }
 

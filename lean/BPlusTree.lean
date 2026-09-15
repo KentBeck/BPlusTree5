@@ -4,9 +4,11 @@ import BPlusTree.Model.Branch
 import BPlusTree.Model.Tree
 import BPlusTree.Model.Delete
 import BPlusTree.Model.Read
+import BPlusTree.Model.Check
 import BPlusTree.Proofs.Leaf
 import BPlusTree.Proofs.Spec
 import BPlusTree.Proofs.Branch
 import BPlusTree.Proofs.Tree
 import BPlusTree.Proofs.Delete
 import BPlusTree.Proofs.Read
+import BPlusTree.Proofs.Check
