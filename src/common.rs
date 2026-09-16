@@ -1,4 +1,6 @@
+#[cfg(any(test, feature = "internal"))]
 use alloc::format;
+#[cfg(any(test, feature = "internal"))]
 use alloc::string::String;
 use core::borrow::Borrow;
 use core::ptr::NonNull;
@@ -6,12 +8,14 @@ use core::ptr::NonNull;
 use crate::layout;
 use crate::{BPlusTreeMap, NodeHdr, NodeTag};
 
+#[cfg(any(test, feature = "internal"))]
 pub(crate) struct ValidationState<K> {
     pub(crate) total_items: usize,
     pub(crate) prev_leaf: Option<NonNull<u8>>,
     pub(crate) prev_key: Option<K>,
 }
 
+#[cfg(any(test, feature = "internal"))]
 impl<K: Ord + Clone> ValidationState<K> {
     /// Check this leaf's keys against the leaf visited immediately before it,
     /// then make it the reference point for the next leaf in traversal order.
@@ -412,6 +416,7 @@ impl<K: Ord + Clone, V> BPlusTreeMap<K, V> {
 
     /// Validate a subtree and return its height: 0 for a leaf, one more than
     /// its children for a branch, all of whose children must agree.
+    #[cfg(any(test, feature = "internal"))]
     pub(crate) unsafe fn validate_node(
         &self,
         node: NonNull<u8>,
@@ -427,6 +432,7 @@ impl<K: Ord + Clone, V> BPlusTreeMap<K, V> {
         }
     }
 
+    #[cfg(any(test, feature = "internal"))]
     pub(crate) unsafe fn validate_leaf(
         &self,
         leaf: NonNull<u8>,
@@ -449,6 +455,7 @@ impl<K: Ord + Clone, V> BPlusTreeMap<K, V> {
         Ok(0)
     }
 
+    #[cfg(any(test, feature = "internal"))]
     fn validate_leaf_occupancy(&self, len: usize, is_root: bool) -> Result<(), String> {
         let cap = self.leaf_layout.cap as usize;
         if len > cap {
@@ -468,6 +475,7 @@ impl<K: Ord + Clone, V> BPlusTreeMap<K, V> {
         Ok(())
     }
 
+    #[cfg(any(test, feature = "internal"))]
     fn validate_leaf_key_order_and_bounds(
         &self,
         keys: &[K],
@@ -493,6 +501,7 @@ impl<K: Ord + Clone, V> BPlusTreeMap<K, V> {
         Ok(())
     }
 
+    #[cfg(any(test, feature = "internal"))]
     unsafe fn validate_leaf_chain_position(
         &self,
         leaf: NonNull<u8>,
@@ -523,6 +532,7 @@ impl<K: Ord + Clone, V> BPlusTreeMap<K, V> {
         Ok(())
     }
 
+    #[cfg(any(test, feature = "internal"))]
     pub(crate) unsafe fn validate_branch(
         &self,
         branch: NonNull<u8>,

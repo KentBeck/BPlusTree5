@@ -76,90 +76,87 @@ All 245 `deno_npm` tests pass on the B+ tree. Both benchmark binaries were
 built from the same Deno checkout and run interleaved; every row below is
 one full divan run (100 samples for `test`, 1000 for `nextjs_resolve`).
 
-Synthetic resolver benchmark, `resolution::test` (26 packages × 100
+Synthetic resolver benchmark, `resolution::test` (26 packages x 100
 versions, in-memory registry), median per run:
 
-| Round | std BTreeMap | BPlusTreeMap (512 B leaves) |
-|-------|--------------|-----------------------------|
-| 1     | 31.44 ms     | 32.32 ms                    |
-| 2     | 29.45 ms     | 32.97 ms                    |
-| 3     | 29.42 ms     | 34.17 ms                    |
-| 4     | 29.58 ms     | 33.74 ms                    |
-| 5     | 30.40 ms     | 33.84 ms                    |
+| Round | std BTreeMap | BPlusTreeMap |
+|-------|--------------|--------------|
+| 1     | 31.18 ms     | 34.55 ms     |
+| 2     | 32.04 ms     | 34.02 ms     |
+| 3     | 30.90 ms     | 33.97 ms     |
+| 4     | 30.02 ms     | 33.09 ms     |
+| 5     | 30.13 ms     | 36.52 ms     |
 
 Real-world benchmark, `resolution::nextjs_resolve` (resolving `next@15.1.2`
 against 58 cached npm packuments), median per run:
 
-| Round | std BTreeMap | BPlusTreeMap (512 B leaves) |
-|-------|--------------|-----------------------------|
-| 1     | 2.010 ms     | 2.106 ms                    |
-| 2     | 2.034 ms     | 2.179 ms                    |
-| 3     | 2.039 ms     | 2.117 ms                    |
+| Round | std BTreeMap | BPlusTreeMap |
+|-------|--------------|--------------|
+| 1     | 1.873 ms     | 1.980 ms     |
+| 2     | 1.902 ms     | 2.007 ms     |
+| 3     | 1.928 ms     | 2.046 ms     |
 
-**The B+ tree is 10–12% slower on the synthetic benchmark and 4–7% slower
-on the real one. There is no systemic improvement; the regression is
-consistent across every interleaved round, well outside the run-to-run
-spread.**
+**The B+ tree is about 10% slower on the synthetic benchmark and about 6%
+slower on the real one. There is no systemic improvement; the regression
+is consistent across every interleaved round.**
 
 ## Why
 
-Callgrind and cachegrind on `resolution::test` (10 samples each,
-deterministic):
+Cachegrind on `resolution::test`, 10 samples, deterministic. The middle
+column is the first run of this experiment, where the missing API was
+composed in a shim crate; the right column is the same benchmark after
+the library grew the API natively.
 
-| Metric              | std BTreeMap   | BPlusTreeMap   | Δ      |
-|---------------------|----------------|----------------|--------|
-| Instructions        | 3,043 M        | 3,162 M        | +3.9%  |
-| D1 misses           | 34.78 M        | 37.13 M        | +6.8%  |
-| I1 misses           | 14.03 M        | 15.20 M        | +8.3%  |
-| LL misses           | 0.248 M        | 0.268 M        | +8.4%  |
-| malloc calls        | 1.33 M         | 1.30 M         | −2%    |
+| Metric       | std BTreeMap | via the shim   | native         |
+|--------------|--------------|----------------|----------------|
+| Instructions | 3,043 M      | 3,162 M (+3.9%)| 3,175 M (+4.3%)|
+| D1 misses    | 34.78 M      | 37.13 M (+6.8%)| 35.26 M (+0.5%)|
+| I1 misses    | 14.03 M      | 15.20 M (+8.3%)| 15.37 M (+9.8%)|
+| LL misses    | 0.248 M      | 0.268 M (+8.4%)| 0.267 M (+7.8%)|
 
-Two facts explain the result:
+Two things this says.
 
-1. **The maps are a small share of the work.** In both builds the
-   resolver's time goes to semver matching (`VersionReq::matches` 26% of
-   instructions, `Version::cmp` 7%), the allocator (~10%), hashing, and
-   cloning package info. All ordered-map code together is roughly 2–4% of
-   instructions. Even a zero-cost map could not produce a systemic win
-   here; the ceiling was a few percent.
-2. **These are tiny maps, and the tree is tuned for big ones.** A node's
-   `children` map holds a handful of dependencies; `root_packages` holds
-   100 entries at most. std's `BTreeMap` keeps up to 11 entries in a
-   single 11-slot node. Our leaf for `(StackString, NodeId)` holds 18
-   slots (512-byte payload budget), so each map touches more cache lines
-   than the data needs, and the shim's composed operations (entry API as
-   `contains_key` + `insert` + `get_mut`, `clone` as per-item insert,
-   owned iteration as repeated `pop_first`) cost extra descents that std
-   does structurally. The extra D1/I1 misses and the 4% more
-   instructions add up to the 10% wall-time gap.
+**The composed operations really were costing data-cache misses, and
+making them native recovered almost all of them.** The shim's entry API
+descended up to three times to fill one vacant slot, its owned iterator
+popped the first entry at a descent apiece, and `remove_entry` looked the
+key up twice. Those are gone: an occupied entry keeps the slot its lookup
+landed on, a vacant one is filled by the insert that already knows where
+it wrote, the owning iterator walks the leaf chain, and `remove_entry`
+reads the stored key out of its slot. The extra data-cache misses over
+std fell from 6.8% to 0.5%.
 
-The strengths measured in this repo's own benchmarks (1.9× faster random
-`get`, 3–5× faster iteration at a million `u64` keys) come from large,
-cache-friendly leaves. That design works against the map in the regime
-this host lives in: thousands of maps with fewer than twenty entries each.
+**It bought no wall-clock time.** The instruction count did not fall with
+the misses; it rose slightly, because threading the value slot out of
+`insert` adds a store to every insert, whether or not an entry wanted it.
+The benchmark is where it was: about 10% behind.
+
+The reason the earlier write-up gave still holds, and is the one that
+matters. Ordered-map code is roughly 2-4% of this workload's
+instructions. The resolver spends its time on semver matching
+(`VersionReq::matches` is 26% of instructions, `Version::cmp` another
+7%), the allocator, hashing and cloning package info. A map that cost
+nothing at all could not have produced a systemic win here, and the maps
+in question hold a handful to a hundred entries each where std keeps up
+to eleven in a single node. The prediction that a native entry API and a
+draining owned iterator were "the levers" was wrong: they were real
+improvements to the library, and they are invisible in this host.
 
 ## Leaf-size check
 
 To test whether node size alone explains the gap, a third binary was
-built with the shim's default leaf budget lowered from 512 to 256 bytes
-(9 slots for this key/value pair, close to std's 11). Four interleaved
-rounds of `resolution::test`, medians (this session ran noisier than the
-first set):
+built with the default leaf budget lowered from 512 to 256 bytes (9 slots
+for this key/value pair, close to std's 11). Four interleaved rounds of
+`resolution::test`, medians (that session ran noisier than the others):
 
-| Round | std BTreeMap | B+ tree, 512 B leaves | B+ tree, 256 B leaves |
-|-------|--------------|-----------------------|-----------------------|
-| 1     | 32.67 ms     | 33.31 ms              | 34.94 ms              |
-| 2     | 33.33 ms     | 34.86 ms              | 34.81 ms              |
-| 3     | 31.92 ms     | 34.35 ms              | 34.57 ms              |
-| 4     | 32.30 ms     | 36.17 ms              | 35.47 ms              |
+| Round | std BTreeMap | 512 B leaves | 256 B leaves |
+|-------|--------------|--------------|--------------|
+| 1     | 32.67 ms     | 33.31 ms     | 34.94 ms     |
+| 2     | 33.33 ms     | 34.86 ms     | 34.81 ms     |
+| 3     | 31.92 ms     | 34.35 ms     | 34.57 ms     |
+| 4     | 32.30 ms     | 36.17 ms     | 35.47 ms     |
 
-Smaller leaves do not close the gap. The remaining cost is in the
-per-operation constant factors of the tiny-map regime: the shim's composed
-entry API (three descents for a vacant insert), item-by-item `clone`, and
-`pop_first`-driven owned iteration, against std's single-node fast paths.
-Those are fixable in the library (a native `entry`, a structural clone, a
-draining owned iterator), but the ceiling in this host is a few percent,
-not a systemic win.
+Smaller leaves do not close the gap either.
 
 ## Reproducing
 

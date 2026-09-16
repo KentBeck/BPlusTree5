@@ -221,24 +221,29 @@ Done in this change: `bench_insert` now defaults to cap=128 (was 16), and
 `with_cache_lines(2, 2)` ≈ 6-entry nodes, which made range look 2.5–3×
 worse than the tree actually is). Any future benchmark must use cap ≥ 64.
 
-## Field test: Deno's npm resolver (2026-09-12)
+## Field test: Deno's npm resolver (2026-09-16)
 
 `experiments/deno_npm/` swaps the tree into `deno_npm`, the one project
 among Materialize, Deno, Foundry, Biome, and SurrealDB whose core
 algorithm is genuinely built on `BTreeMap`. All 245 of its tests pass on
-the tree via the `bplustree-compat` shim (`compat/`). Its benchmarks show
-a consistent **loss**: 10–12% slower on the synthetic resolver, 4–7% on
-resolving `next@15.1.2`. Two lessons for this plan:
+the tree, now through a plain import change rather than a shim. Its
+benchmarks show a consistent **loss**: about 10% slower on the synthetic
+resolver, about 6% on resolving `next@15.1.2`. Three lessons for this
+plan:
 
 - The maps in that host are tiny (a handful to ~100 entries, thousands of
-  them) and account for only 2–4% of its instructions. No ordered-map
-  swap can show a systemic win there; the leaf-size tuning above targets
-  the opposite regime (one map, a million keys).
-- In the tiny-map regime the losses are constant factors, not node size
-  (256-byte leaves did not help): the shim composes `entry`, `clone`, and
-  owned iteration from descents where std has single-node fast paths. If
-  the small-map regime ever matters, the levers are a native `entry`
-  API, a structural `clone`, and a draining `into_iter` in the library.
+  them) and account for only 2-4% of its instructions. No ordered-map
+  swap can show a systemic win there; the tuning above targets the
+  opposite regime (one map, a million keys).
+- Node size is not the lever in that regime: 256-byte leaves, which hold
+  about what a std node holds, did not help.
+- Neither were descent counts, though that was the standing prediction.
+  Giving the library a native entry API, a native owning iterator and a
+  one-descent `remove_entry` cut the excess L1 data-cache misses over std
+  from 6.8% to 0.5% and moved the benchmark not at all, because the
+  instruction count stayed where it was. Cache behaviour in the
+  small-map regime is now level with std; instruction count on the
+  descent path is what remains.
 
 ## Sequencing
 
