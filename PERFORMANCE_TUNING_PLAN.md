@@ -122,8 +122,9 @@ a. ~~**Stop zeroing vacated slots on split paths.**~~ — DONE, but
    **perf-neutral**. All `write_bytes` zeroing of vacated key/value/child
    slots on the insert split paths, the delete borrow/merge paths, and
    `move_kv_at` is removed; occupancy is defined solely by `hdr.len` (the
-   null child-pointer sentinels in delete.rs stay — `check_root_collapse`
-   reads them). Proved safe by the full gate including Miri over the fuzz,
+   null child-pointer sentinels `check_root_collapse` wrote and read for
+   itself went later, once the Lean delete proofs showed nothing else
+   produced a null child). Proved safe by the full gate including Miri over the fuzz,
    drop/clear, and borrowing suites. An interleaved A/B of the before/after
    binaries showed no gain beyond noise (the commit message's claimed
    improvement was cross-run variance — see the measurement note below).
@@ -138,6 +139,13 @@ b. ~~**Iterative descent.**~~ — DONE. `insert()` now descends iteratively,
    identical. Wall-clock neutral on this machine because the workload is
    memory-bound (~17 D1 misses per insert, unchanged); the instruction win
    is real but hidden behind stalls. Bonus: no unbounded recursion.
+
+   **Reverted** (see LEAN_VERIFICATION_PLAN.md): insert is recursive
+   again so it mirrors `remove_rec` and the Lean model, and the fixed
+   64-slot path array is gone. Re-measured on the way back: +7.3%
+   instructions (89.1M → 95.6M), identical D1/LL misses, wall clock
+   within noise on an interleaved A/B. Recursion depth is logarithmic in
+   the entry count, so it was never unbounded in practice.
 
    **Key diagnosis from the cache simulation: random insert is D1-miss
    bound, not instruction bound.** Instruction-shaving alone won't move

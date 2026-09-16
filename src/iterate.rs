@@ -1,5 +1,3 @@
-use core::borrow::Borrow;
-use core::marker::PhantomData;
 use core::ops::{Bound, RangeBounds};
 use core::ptr::NonNull;
 
@@ -26,11 +24,10 @@ pub struct Items<'a, K, V> {
     back_vals: *const V,
 }
 
-impl<'a, K: Ord, V> Items<'a, K, V> {
-    /// Step the front cursor, returning raw slot pointers. Both the shared
-    /// and the mutable iterator are built on this; the pointers carry the
-    /// node allocation's provenance, not that of any reference.
-    fn next_ptrs(&mut self) -> Option<(*const K, *mut V)> {
+impl<'a, K: Ord, V> Iterator for Items<'a, K, V> {
+    type Item = (&'a K, &'a V);
+
+    fn next(&mut self) -> Option<Self::Item> {
         loop {
             let leaf = self.front_leaf?;
             let same = leaf == self.back_leaf;
@@ -38,8 +35,8 @@ impl<'a, K: Ord, V> Items<'a, K, V> {
 
             if self.front_idx < limit {
                 unsafe {
-                    let k = self.front_keys.add(self.front_idx);
-                    let v = self.front_vals.add(self.front_idx) as *mut V;
+                    let k = &*self.front_keys.add(self.front_idx);
+                    let v = &*self.front_vals.add(self.front_idx);
                     self.front_idx += 1;
                     return Some((k, v));
                 }
@@ -71,8 +68,17 @@ impl<'a, K: Ord, V> Items<'a, K, V> {
         }
     }
 
-    /// Step the back cursor; see [`Items::next_ptrs`].
-    fn next_back_ptrs(&mut self) -> Option<(*const K, *mut V)> {
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        if self.front_leaf.is_none() {
+            (0, Some(0))
+        } else {
+            (0, None)
+        }
+    }
+}
+
+impl<'a, K: Ord, V> DoubleEndedIterator for Items<'a, K, V> {
+    fn next_back(&mut self) -> Option<<Self as Iterator>::Item> {
         loop {
             let fleaf = self.front_leaf?;
             let same = fleaf == self.back_leaf;
@@ -81,8 +87,8 @@ impl<'a, K: Ord, V> Items<'a, K, V> {
             if self.back_idx > lower {
                 unsafe {
                     self.back_idx -= 1;
-                    let k = self.back_keys.add(self.back_idx);
-                    let v = self.back_vals.add(self.back_idx) as *mut V;
+                    let k = &*self.back_keys.add(self.back_idx);
+                    let v = &*self.back_vals.add(self.back_idx);
                     return Some((k, v));
                 }
             }
@@ -111,28 +117,6 @@ impl<'a, K: Ord, V> Items<'a, K, V> {
                 }
             }
         }
-    }
-}
-
-impl<'a, K: Ord, V> Iterator for Items<'a, K, V> {
-    type Item = (&'a K, &'a V);
-
-    fn next(&mut self) -> Option<Self::Item> {
-        self.next_ptrs().map(|(k, v)| unsafe { (&*k, &*v) })
-    }
-
-    fn size_hint(&self) -> (usize, Option<usize>) {
-        if self.front_leaf.is_none() {
-            (0, Some(0))
-        } else {
-            (0, None)
-        }
-    }
-}
-
-impl<'a, K: Ord, V> DoubleEndedIterator for Items<'a, K, V> {
-    fn next_back(&mut self) -> Option<Self::Item> {
-        self.next_back_ptrs().map(|(k, v)| unsafe { (&*k, &*v) })
     }
 }
 
@@ -180,60 +164,6 @@ impl<'a, K: Ord, V> DoubleEndedIterator for Values<'a, K, V> {
     }
 }
 
-/// Mutable-value counterpart of [`Items`].
-///
-/// The map is exclusively borrowed for `'a`, and the value pointers come
-/// from the node allocations rather than through any shared reference to
-/// the map, so handing out `&'a mut V` is sound.
-pub struct ItemsMut<'a, K, V> {
-    inner: Items<'a, K, V>,
-    _marker: PhantomData<&'a mut V>,
-}
-
-impl<'a, K: Ord, V> Iterator for ItemsMut<'a, K, V> {
-    type Item = (&'a K, &'a mut V);
-
-    fn next(&mut self) -> Option<Self::Item> {
-        self.inner
-            .next_ptrs()
-            .map(|(k, v)| unsafe { (&*k, &mut *v) })
-    }
-
-    fn size_hint(&self) -> (usize, Option<usize>) {
-        self.inner.size_hint()
-    }
-}
-
-impl<'a, K: Ord, V> DoubleEndedIterator for ItemsMut<'a, K, V> {
-    fn next_back(&mut self) -> Option<Self::Item> {
-        self.inner
-            .next_back_ptrs()
-            .map(|(k, v)| unsafe { (&*k, &mut *v) })
-    }
-}
-
-pub struct ValuesMut<'a, K, V> {
-    inner: ItemsMut<'a, K, V>,
-}
-
-impl<'a, K: Ord, V> Iterator for ValuesMut<'a, K, V> {
-    type Item = &'a mut V;
-
-    fn next(&mut self) -> Option<Self::Item> {
-        self.inner.next().map(|(_, v)| v)
-    }
-
-    fn size_hint(&self) -> (usize, Option<usize>) {
-        self.inner.size_hint()
-    }
-}
-
-impl<'a, K: Ord, V> DoubleEndedIterator for ValuesMut<'a, K, V> {
-    fn next_back(&mut self) -> Option<Self::Item> {
-        self.inner.next_back().map(|(_, v)| v)
-    }
-}
-
 impl<K: Ord + Clone, V> BPlusTreeMap<K, V> {
     fn empty_items(&self) -> Items<'_, K, V> {
         Items {
@@ -251,11 +181,10 @@ impl<K: Ord + Clone, V> BPlusTreeMap<K, V> {
     }
 
     /// Resolve the start bound to the position of the first in-range item.
-    unsafe fn resolve_front<Q>(&self, start: Bound<&Q>) -> Option<(NonNull<u8>, usize)>
-    where
-        K: Borrow<Q>,
-        Q: Ord + ?Sized,
-    {
+    /// Lean: `resolveFront_spec` (`Proofs/Read.lean`): the position is the
+    /// number of entries below the start bound; `resolveFrontH_sim`
+    /// (`Proofs/HeapRead.lean`) maps the `(leaf, index)` pair to it.
+    unsafe fn resolve_front(&self, start: Bound<&K>) -> Option<(NonNull<u8>, usize)> {
         let Some(k) = bound_key(start) else {
             let leaf = self.leftmost_leaf()?;
             // Only a root leaf can be empty, and it has no siblings.
@@ -274,11 +203,9 @@ impl<K: Ord + Clone, V> BPlusTreeMap<K, V> {
     }
 
     /// Resolve the end bound to the position one past the last in-range item.
-    unsafe fn resolve_back<Q>(&self, end: Bound<&Q>) -> Option<(NonNull<u8>, usize)>
-    where
-        K: Borrow<Q>,
-        Q: Ord + ?Sized,
-    {
+    /// Lean: `resolveBack_spec`: the number of entries within the end bound;
+    /// `resolveBackH_sim` on the heap.
+    unsafe fn resolve_back(&self, end: Bound<&K>) -> Option<(NonNull<u8>, usize)> {
         let Some(k) = bound_key(end) else {
             let leaf = self.rightmost_leaf()?;
             let len = self.node_len(leaf);
@@ -301,28 +228,26 @@ impl<K: Ord + Clone, V> BPlusTreeMap<K, V> {
     /// into those before `k` and those after. With `after_equal` an exact
     /// match falls before the cut, otherwise after it. Returns
     /// `(leaf, cut, len)`; the cut may equal 0 or `len`.
-    unsafe fn cut_in_leaf<Q>(&self, k: &Q, after_equal: bool) -> Option<(NonNull<u8>, usize, usize)>
-    where
-        K: Borrow<Q>,
-        Q: Ord + ?Sized,
-    {
+    /// Lean: `cutInLeaf_spec`: the cut counts the leaf's keys on one side.
+    unsafe fn cut_in_leaf(&self, k: &K, after_equal: bool) -> Option<(NonNull<u8>, usize, usize)> {
         let leaf = self.leaf_for_key(k)?;
         let parts = layout::carve_leaf::<K, V>(leaf, &self.leaf_layout);
         let len = (*parts.hdr).len as usize;
         let keys = core::slice::from_raw_parts(parts.keys_ptr as *const K, len);
         let cut = if after_equal {
-            keys.partition_point(|x| x.borrow() <= k)
+            keys.partition_point(|x| x <= k)
         } else {
-            keys.partition_point(|x| x.borrow() < k)
+            keys.partition_point(|x| x < k)
         };
         Some((leaf, cut, len))
     }
 
-    fn make_items<Q>(&self, start: Bound<&Q>, end: Bound<&Q>) -> Items<'_, K, V>
-    where
-        K: Borrow<Q>,
-        Q: Ord + ?Sized,
-    {
+    /// Lean: `rangeTree_spec` (`Proofs/Read.lean`): the items yielded are
+    /// exactly the entries between the bounds, inverted bounds included;
+    /// `itemsTree_spec` for `items`. On the heap model, `rangeH_sim`
+    /// (`Proofs/HeapRead.lean`): hopping along `next` from the front leaf to
+    /// the back leaf (`drainH_sim`) reads exactly that slice of the entries.
+    fn make_items(&self, start: Bound<&K>, end: Bound<&K>) -> Items<'_, K, V> {
         unsafe {
             let (front_leaf, front_idx) = match self.resolve_front(start) {
                 Some(pos) => pos,
@@ -341,7 +266,7 @@ impl<K: Ord + Clone, V> BPlusTreeMap<K, V> {
             // bound; if that key violates the end bound the range is empty
             // (this also covers inverted bounds). Otherwise the front
             // position is strictly before the back position.
-            let first_key: &Q = (*front_keys.add(front_idx)).borrow();
+            let first_key = &*front_keys.add(front_idx);
             let in_range = match end {
                 Bound::Unbounded => true,
                 Bound::Included(e) => first_key <= e,
@@ -383,46 +308,18 @@ impl<K: Ord + Clone, V> BPlusTreeMap<K, V> {
         }
     }
 
-    pub fn items_mut(&mut self) -> ItemsMut<'_, K, V> {
-        ItemsMut {
-            inner: self.items(),
-            _marker: PhantomData,
-        }
-    }
-
-    pub fn values_mut(&mut self) -> ValuesMut<'_, K, V> {
-        ValuesMut {
-            inner: self.items_mut(),
-        }
-    }
-
-    pub fn range_mut<Q, R>(&mut self, r: R) -> ItemsMut<'_, K, V>
-    where
-        K: Borrow<Q>,
-        Q: Ord + ?Sized,
-        R: RangeBounds<Q>,
-    {
-        ItemsMut {
-            inner: self.make_items(r.start_bound(), r.end_bound()),
-            _marker: PhantomData,
-        }
-    }
-
     pub fn items_range(&self, start: Option<&K>, end: Option<&K>) -> Items<'_, K, V> {
         let sb = start.map_or(Bound::Unbounded, Bound::Included);
         let eb = end.map_or(Bound::Unbounded, Bound::Excluded);
         self.make_items(sb, eb)
     }
 
-    pub fn range<Q, R>(&self, r: R) -> Items<'_, K, V>
-    where
-        K: Borrow<Q>,
-        Q: Ord + ?Sized,
-        R: RangeBounds<Q>,
-    {
+    pub fn range<R: RangeBounds<K>>(&self, r: R) -> Items<'_, K, V> {
         self.make_items(r.start_bound(), r.end_bound())
     }
 
+    /// Lean: `firstTree_spec` (`Proofs/Read.lean`): the first entry;
+    /// `firstH_sim` (`Proofs/HeapRead.lean`) on the heap.
     pub fn first(&self) -> Option<(&K, &V)> {
         let leaf = self.leftmost_leaf()?;
         unsafe {
@@ -437,6 +334,8 @@ impl<K: Ord + Clone, V> BPlusTreeMap<K, V> {
         }
     }
 
+    /// Lean: `lastTree_spec` (`Proofs/Read.lean`): the last entry;
+    /// `lastH_sim` (`Proofs/HeapRead.lean`) on the heap.
     pub fn last(&self) -> Option<(&K, &V)> {
         let leaf = self.rightmost_leaf()?;
         unsafe {
@@ -455,7 +354,7 @@ impl<K: Ord + Clone, V> BPlusTreeMap<K, V> {
 }
 
 /// The key a bound is anchored on, or `None` for `Unbounded`.
-fn bound_key<T: ?Sized>(bound: Bound<&T>) -> Option<&T> {
+fn bound_key<T>(bound: Bound<&T>) -> Option<&T> {
     match bound {
         Bound::Included(k) | Bound::Excluded(k) => Some(k),
         Bound::Unbounded => None,

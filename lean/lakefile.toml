@@ -1,0 +1,9 @@
+name = "bplustree"
+defaultTargets = ["BPlusTree"]
+
+[[lean_lib]]
+name = "BPlusTree"
+
+[[lean_exe]]
+name = "replay"
+root = "Replay.Main"

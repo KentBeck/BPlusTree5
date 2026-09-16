@@ -13,6 +13,8 @@ mod iterate;
 mod layout;
 mod node_alloc;
 
+#[cfg(feature = "compat_test_api")]
+pub use common::ShapeHasher;
 #[cfg(feature = "delete_profile")]
 pub use delete::DeleteProfile;
 pub use iterate::{Items, ItemsMut, Keys, Values, ValuesMut};
@@ -92,6 +94,8 @@ impl<K, V> BPlusTreeMap<K, V> {
     /// Used by `Drop` and `clear`, which own the whole tree; the incremental
     /// paths in `delete` instead free nodes whose contents have already moved
     /// elsewhere (see `free_emptied_leaf` / `free_emptied_branch`).
+    /// Lean: `dropSubtreeH_spec` (`Proofs/HeapLedger.lean`): frees exactly the
+    /// subtree's nodes, each once, so each slot's contents drop exactly once.
     unsafe fn drop_subtree(&mut self, node: NonNull<u8>) {
         let hdr = &*(node.as_ptr() as *const NodeHdr);
         match hdr.tag {
@@ -226,6 +230,8 @@ impl<K: Ord + Clone, V> BPlusTreeMap<K, V> {
         self.entry_count
     }
 
+    /// Lean: `clearH_sim` (`Proofs/HeapLedger.lean`): the store is empty
+    /// afterwards; `runH_ledger` closes the books over any operation sequence.
     pub fn clear(&mut self) {
         self.entry_count = 0;
         if let Some(root) = self.root.take() {

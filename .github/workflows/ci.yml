@@ -50,3 +50,24 @@ jobs:
           cargo miri test --test drop_and_clear_tests -- --include-ignored
           cargo miri test --test memory_safety_audit
           cargo miri test --test borrowing_double_free_test
+
+  lean:
+    name: Lean proofs
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      # Builds the model and proofs in lean/; a `sorry` or a broken proof
+      # fails the job. Toolchain pinned by lean/lean-toolchain.
+      - uses: leanprover/lean-action@v1
+        with:
+          lake-package-directory: lean
+          test: false
+      # Replay: generate insert traces from the Rust tree and check that
+      # the Lean model produces the same tree shape at every dump.
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Replay Rust traces through the Lean model
+        run: ./lean/replay.sh

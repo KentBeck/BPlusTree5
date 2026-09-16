@@ -1,41 +1,27 @@
 use alloc::vec::Vec;
-use core::borrow::Borrow;
 
 use crate::layout;
 use crate::{BPlusTreeError, BPlusTreeMap, BTreeResult};
 
 impl<K: Ord + Clone, V> BPlusTreeMap<K, V> {
-    pub fn get<Q>(&self, key: &Q) -> Option<&V>
-    where
-        K: Borrow<Q>,
-        Q: Ord + ?Sized,
-    {
+    /// Lean: `getTree_spec` (`Proofs/Read.lean`): `Some(v)` exactly when
+    /// `(key, v)` is one of the tree's entries; `getH_sim`
+    /// (`Proofs/HeapRead.lean`) for the same descent over node ids.
+    pub fn get(&self, key: &K) -> Option<&V> {
         let (parts, idx) = self.leaf_search(key)?;
         unsafe { Some(&*(parts.vals_ptr.add(idx) as *const V)) }
     }
 
-    pub fn get_mut<Q>(&mut self, key: &Q) -> Option<&mut V>
-    where
-        K: Borrow<Q>,
-        Q: Ord + ?Sized,
-    {
+    pub fn get_mut(&mut self, key: &K) -> Option<&mut V> {
         let (parts, idx) = self.leaf_search(key)?;
         unsafe { Some(&mut *(parts.vals_ptr.add(idx) as *mut V)) }
     }
 
-    pub fn get_item<Q>(&self, key: &Q) -> Result<&V, BPlusTreeError>
-    where
-        K: Borrow<Q>,
-        Q: Ord + ?Sized,
-    {
+    pub fn get_item(&self, key: &K) -> Result<&V, BPlusTreeError> {
         self.get(key).ok_or(BPlusTreeError::KeyNotFound)
     }
 
-    pub fn contains_key<Q>(&self, key: &Q) -> bool
-    where
-        K: Borrow<Q>,
-        Q: Ord + ?Sized,
-    {
+    pub fn contains_key(&self, key: &K) -> bool {
         self.get(key).is_some()
     }
 
@@ -54,11 +40,8 @@ impl<K: Ord + Clone, V> BPlusTreeMap<K, V> {
         Ok(out)
     }
 
-    pub(crate) fn leaf_search<Q>(&self, key: &Q) -> Option<(layout::LeafParts<K, V>, usize)>
-    where
-        K: Borrow<Q>,
-        Q: Ord + ?Sized,
-    {
+    /// Lean: `leafSearch_some` and `leafSearch_none` (`Proofs/Read.lean`).
+    pub(crate) fn leaf_search(&self, key: &K) -> Option<(layout::LeafParts<K, V>, usize)> {
         let leaf = self.leaf_for_key(key)?;
         unsafe {
             let parts = layout::carve_leaf::<K, V>(leaf, &self.leaf_layout);
