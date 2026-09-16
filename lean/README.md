@@ -3,7 +3,10 @@
 A Lean 4 model of the B+ tree in `../src`, with proofs of the invariants the
 Rust `check_invariants_detailed` checks at runtime. See
 `../LEAN_VERIFICATION_PLAN.md` for scope and the phases; this directory is
-where the phases land.
+where the phases land. For what was proved and what it buys, start with
+`../LEAN_PROOF.md`, which also has a reading order through these files;
+`../PROOF_GUIDED_CLEANUP.md` is the worked example of the proofs removing
+dead code from the Rust.
 
 Build with `lake build` (toolchain pinned in `lean-toolchain`; no Mathlib,
 only core `Std`). CI runs it on every push.
