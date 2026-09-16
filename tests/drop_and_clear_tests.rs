@@ -60,7 +60,7 @@ fn test_drop_frees_all_memory_single_leaf() {
     let counter = Arc::new(AtomicUsize::new(0));
 
     {
-        let mut tree = BPlusTreeMap::new(10).unwrap();
+        let mut tree = BPlusTreeMap::with_capacity(10);
 
         // Insert items into a single leaf
         for i in 0..5 {
@@ -88,7 +88,7 @@ fn test_drop_frees_all_memory_multi_level_tree() {
     let counter = Arc::new(AtomicUsize::new(0));
 
     {
-        let mut tree = BPlusTreeMap::new(5).unwrap();
+        let mut tree = BPlusTreeMap::with_capacity(5);
 
         // Insert enough to create a multi-level tree
         for i in 0..100 {
@@ -120,7 +120,7 @@ fn test_drop_frees_all_memory_multi_level_tree() {
 fn test_clear_frees_all_memory() {
     let counter = Arc::new(AtomicUsize::new(0));
 
-    let mut tree = BPlusTreeMap::new(5).unwrap();
+    let mut tree = BPlusTreeMap::with_capacity(5);
 
     // Insert items
     for i in 0..50 {
@@ -161,7 +161,7 @@ fn test_clear_frees_all_memory() {
 fn test_clear_and_reuse_with_drop_tracking() {
     let counter = Arc::new(AtomicUsize::new(0));
 
-    let mut tree = BPlusTreeMap::new(5).unwrap();
+    let mut tree = BPlusTreeMap::with_capacity(5);
 
     // First batch
     for i in 0..30 {
@@ -220,7 +220,7 @@ fn test_drop_after_removes() {
     let counter = Arc::new(AtomicUsize::new(0));
 
     {
-        let mut tree = BPlusTreeMap::new(5).unwrap();
+        let mut tree = BPlusTreeMap::with_capacity(5);
 
         // Insert items
         println!("Inserting 50 items...");
@@ -284,7 +284,7 @@ fn test_drop_with_complex_tree_structure() {
     let counter = Arc::new(AtomicUsize::new(0));
 
     {
-        let mut tree = BPlusTreeMap::new(4).unwrap();
+        let mut tree = BPlusTreeMap::with_capacity(4);
 
         // Create a complex tree with multiple levels
         // Insert in a pattern that creates splits
@@ -324,7 +324,7 @@ fn test_drop_with_complex_tree_structure() {
 #[test]
 fn test_multiple_clear_cycles() {
     let counter = Arc::new(AtomicUsize::new(0));
-    let mut tree = BPlusTreeMap::new(5).unwrap();
+    let mut tree = BPlusTreeMap::with_capacity(5);
 
     for cycle in 0..10 {
         // Insert items
@@ -358,7 +358,7 @@ fn test_multiple_clear_cycles() {
 fn test_drop_with_string_values() {
     // Test with String to ensure heap-allocated values are properly dropped
     {
-        let mut tree = BPlusTreeMap::new(5).unwrap();
+        let mut tree = BPlusTreeMap::with_capacity(5);
 
         for i in 0..100 {
             tree.insert(i, format!("value_{}_with_long_string_data", i));
@@ -376,7 +376,7 @@ fn test_drop_with_string_values() {
 #[test]
 fn test_clear_empty_tree() {
     let counter = Arc::new(AtomicUsize::new(0));
-    let mut tree: BPlusTreeMap<DropCounter, DropCounter> = BPlusTreeMap::new(5).unwrap();
+    let mut tree: BPlusTreeMap<DropCounter, DropCounter> = BPlusTreeMap::with_capacity(5);
 
     // Clear an empty tree (should not panic)
     tree.clear();
@@ -402,7 +402,7 @@ fn test_clear_empty_tree() {
 #[test]
 fn test_minimal_clear() {
     let counter = Arc::new(AtomicUsize::new(0));
-    let mut tree: BPlusTreeMap<DropCounter, DropCounter> = BPlusTreeMap::new(10).unwrap();
+    let mut tree: BPlusTreeMap<DropCounter, DropCounter> = BPlusTreeMap::with_capacity(10);
 
     // Insert just 3 items
     for i in 0..3 {
@@ -423,7 +423,7 @@ fn test_minimal_clear() {
 #[test]
 fn test_simple_remove() {
     let counter = Arc::new(AtomicUsize::new(0));
-    let mut tree: BPlusTreeMap<DropCounter, DropCounter> = BPlusTreeMap::new(5).unwrap();
+    let mut tree: BPlusTreeMap<DropCounter, DropCounter> = BPlusTreeMap::with_capacity(5);
 
     // Insert 50 items like the failing test
     println!("Inserting 50 items...");
@@ -477,7 +477,7 @@ fn test_simple_remove() {
 #[test]
 fn test_clear_with_20_items() {
     let counter = Arc::new(AtomicUsize::new(0));
-    let mut tree: BPlusTreeMap<DropCounter, DropCounter> = BPlusTreeMap::new(5).unwrap();
+    let mut tree: BPlusTreeMap<DropCounter, DropCounter> = BPlusTreeMap::with_capacity(5);
 
     for i in 0..20 {
         let key = DropCounter::new(i, counter.clone());
@@ -516,4 +516,132 @@ fn test_clear_with_20_items() {
     println!("After clear: {} objects", after_clear);
 
     assert_eq!(after_clear, 0, "Expected 0, got {}", after_clear);
+}
+
+// ============================================================================
+// Owning iteration: the iterator takes the map's nodes, so it is responsible
+// for dropping every entry and freeing every node exactly once.
+// ============================================================================
+
+/// Build a tree of `count` tracked entries at a capacity that forces several
+/// levels, and hand back the live-value counter alongside it.
+fn tracked_tree(
+    count: usize,
+    capacity: usize,
+) -> (BPlusTreeMap<i32, DropCounter>, Arc<AtomicUsize>) {
+    let counter = Arc::new(AtomicUsize::new(0));
+    let mut tree = BPlusTreeMap::with_capacity(capacity);
+    for i in 0..count {
+        tree.insert(i as i32, DropCounter::new(i, counter.clone()));
+    }
+    assert_eq!(counter.load(Ordering::SeqCst), count);
+    (tree, counter)
+}
+
+#[test]
+fn into_iter_drained_fully_frees_everything() {
+    let (tree, counter) = tracked_tree(200, 4);
+    let collected: Vec<_> = tree.into_iter().collect();
+    assert_eq!(collected.len(), 200);
+    assert_eq!(counter.load(Ordering::SeqCst), 200, "values still held");
+    drop(collected);
+    assert_eq!(counter.load(Ordering::SeqCst), 0, "values leaked");
+}
+
+#[test]
+fn into_iter_dropped_early_frees_everything() {
+    for taken in [0, 1, 7, 99, 199, 200] {
+        let (tree, counter) = tracked_tree(200, 4);
+        let mut it = tree.into_iter();
+        for _ in 0..taken {
+            drop(it.next().expect("entry"));
+        }
+        assert_eq!(counter.load(Ordering::SeqCst), 200 - taken);
+        drop(it);
+        assert_eq!(
+            counter.load(Ordering::SeqCst),
+            0,
+            "dropping the iterator after {taken} items leaked"
+        );
+    }
+}
+
+#[test]
+fn into_iter_from_both_ends_frees_everything() {
+    let (tree, counter) = tracked_tree(101, 4);
+    let mut it = tree.into_iter();
+    let mut seen = Vec::new();
+    loop {
+        match (it.next(), it.next_back()) {
+            (None, None) => break,
+            (front, back) => {
+                seen.extend(front.map(|(k, _)| k));
+                seen.extend(back.map(|(k, _)| k));
+            }
+        }
+    }
+    assert_eq!(seen.len(), 101, "every entry yielded exactly once");
+    seen.sort_unstable();
+    seen.dedup();
+    assert_eq!(seen.len(), 101, "an entry was yielded twice");
+    assert_eq!(counter.load(Ordering::SeqCst), 0);
+    drop(it);
+    assert_eq!(counter.load(Ordering::SeqCst), 0);
+}
+
+#[test]
+fn into_iter_on_an_empty_map_frees_its_root() {
+    let counter = Arc::new(AtomicUsize::new(0));
+    let mut tree = BPlusTreeMap::with_capacity(4);
+    tree.insert(1, DropCounter::new(1, counter.clone()));
+    tree.remove(&1);
+    assert_eq!(counter.load(Ordering::SeqCst), 0);
+    assert_eq!(tree.into_iter().count(), 0);
+
+    // A map that never held anything has no root at all.
+    let fresh: BPlusTreeMap<i32, DropCounter> = BPlusTreeMap::with_capacity(4);
+    assert_eq!(fresh.into_iter().count(), 0);
+}
+
+#[test]
+fn into_keys_and_values_free_everything() {
+    let (tree, counter) = tracked_tree(120, 5);
+    let keys: Vec<i32> = tree.into_keys().collect();
+    assert_eq!(keys.len(), 120);
+    assert_eq!(counter.load(Ordering::SeqCst), 0, "values leaked");
+
+    let (tree, counter) = tracked_tree(120, 5);
+    let values: Vec<DropCounter> = tree.into_values().collect();
+    assert_eq!(values.len(), 120);
+    assert_eq!(counter.load(Ordering::SeqCst), 120);
+    drop(values);
+    assert_eq!(counter.load(Ordering::SeqCst), 0);
+}
+
+#[test]
+fn append_and_split_off_keep_every_value_once() {
+    let (mut left, counter) = tracked_tree(100, 4);
+    let mut right = left.split_off(&50);
+    assert_eq!(left.len(), 50);
+    assert_eq!(right.len(), 50);
+    assert_eq!(counter.load(Ordering::SeqCst), 100, "split lost a value");
+
+    left.append(&mut right);
+    assert_eq!(left.len(), 100);
+    assert!(right.is_empty());
+    assert_eq!(counter.load(Ordering::SeqCst), 100, "append lost a value");
+
+    drop(right);
+    drop(left);
+    assert_eq!(counter.load(Ordering::SeqCst), 0);
+}
+
+#[test]
+fn retain_drops_exactly_the_rejected_values() {
+    let (mut tree, counter) = tracked_tree(100, 4);
+    tree.retain(|k, _| k % 2 == 0);
+    assert_eq!(tree.len(), 50);
+    assert_eq!(counter.load(Ordering::SeqCst), 50);
+    drop(tree);
+    assert_eq!(counter.load(Ordering::SeqCst), 0);
 }

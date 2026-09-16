@@ -24,11 +24,11 @@ jobs:
       # Builds every target (lib, tests, benches, profiling bins) and runs the
       # full suite, including the default differential fuzz configurations.
       - name: cargo test
-        run: cargo test
+        run: cargo test --all-features
       # Extended differential fuzz vs std::BTreeMap: ~3.2M ops across 160
       # seed/capacity configs with invariant checks and drop tracking.
       - name: Extended differential fuzz (release)
-        run: cargo test --release --test differential_fuzz -- --ignored
+        run: cargo test --release --all-features --test differential_fuzz -- --ignored
 
   miri:
     name: Miri (undefined behavior check)
@@ -50,6 +50,7 @@ jobs:
           cargo miri test --test drop_and_clear_tests -- --include-ignored
           cargo miri test --test memory_safety_audit
           cargo miri test --test borrowing_double_free_test
+          cargo miri test --test std_compatibility
 
   lean:
     name: Lean proofs

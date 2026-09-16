@@ -257,10 +257,7 @@ fn test_extreme_key_values_attack() {
     }
 
     // Test range queries with extreme bounds
-    let range1: Vec<_> = tree
-        .items_range(Some(&i32::MIN), Some(&0))
-        .map(|(k, _)| *k)
-        .collect();
+    let range1: Vec<_> = tree.range(i32::MIN..0).map(|(k, _)| *k).collect();
 
     if range1.len() != 4 {
         // MIN, MIN+1, -1000000, -1
@@ -331,7 +328,7 @@ fn test_ultimate_adversarial_attack() {
         }
 
         // Check iteration still works
-        let count = tree.items().count();
+        let count = tree.iter().count();
         if count != tree.len() {
             panic!("ATTACK SUCCESSFUL: Iterator count mismatch!");
         }

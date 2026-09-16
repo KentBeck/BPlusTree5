@@ -1,9 +1,8 @@
-use alloc::vec::Vec;
-
 use core::ptr::NonNull;
 
 use crate::layout;
-use crate::{alloc_branch_block, alloc_leaf_block, BPlusTreeMap, BTreeResult, NodeHdr, NodeTag};
+use crate::node_alloc::{alloc_branch_block, alloc_leaf_block};
+use crate::{BPlusTreeMap, NodeHdr, NodeTag};
 
 pub(crate) enum InsertResult<K, V> {
     NoSplit(Option<V>),
@@ -22,14 +21,25 @@ impl<K: Ord + Clone, V> BPlusTreeMap<K, V> {
     /// On the heap model, `insertH_sim` (`Proofs/Heap.lean`): no fault, the
     /// store holds exactly the reachable nodes, the sibling chain intact.
     pub fn insert(&mut self, key: K, value: V) -> Option<V> {
-        let old_value = self.insert_inner(key, value);
+        self.insert_at(key, value).1
+    }
+
+    /// Insert, and also hand back a pointer to the value's slot.
+    ///
+    /// The entry API uses this so that filling a vacant entry costs one
+    /// descent instead of an insert followed by a lookup. The pointer stays
+    /// valid until the next mutation: a leaf split moves the value into
+    /// whichever half it sorts into before this returns, and the branch
+    /// splits above a leaf never touch leaf payloads.
+    pub(crate) fn insert_at(&mut self, key: K, value: V) -> (*mut V, Option<V>) {
+        let (slot, old_value) = self.insert_inner(key, value);
         if old_value.is_none() {
             self.entry_count += 1;
         }
-        old_value
+        (slot, old_value)
     }
 
-    fn insert_inner(&mut self, key: K, value: V) -> Option<V> {
+    fn insert_inner(&mut self, key: K, value: V) -> (*mut V, Option<V>) {
         let root = match self.root {
             Some(p) => p,
             None => unsafe { alloc_leaf_block(&self.leaf_layout).expect("alloc leaf") },
@@ -38,7 +48,8 @@ impl<K: Ord + Clone, V> BPlusTreeMap<K, V> {
             self.root = Some(root);
         }
 
-        match unsafe { self.insert_rec(root, key, value) } {
+        let mut slot: *mut V = core::ptr::null_mut();
+        let old_value = match unsafe { self.insert_rec(root, key, value, &mut slot) } {
             InsertResult::NoSplit(old) => old,
             InsertResult::Split {
                 sep_key,
@@ -49,7 +60,9 @@ impl<K: Ord + Clone, V> BPlusTreeMap<K, V> {
                 unsafe { self.grow_root(root, sep_key, right) };
                 old_value
             }
-        }
+        };
+        debug_assert!(!slot.is_null(), "every insert lands in some leaf slot");
+        (slot, old_value)
     }
 
     /// Insert below `node`; on a split, hand the separator and new right
@@ -60,13 +73,19 @@ impl<K: Ord + Clone, V> BPlusTreeMap<K, V> {
     /// Lean: `insertRec_wf` and `insertRec_toList` (`Proofs/Tree.lean`), with
     /// `front_lt_of_route` for the descent through `child_for_key`;
     /// `insertRecH_sim` (`Proofs/Heap.lean`) is the same recursion on the heap.
-    unsafe fn insert_rec(&mut self, node: NonNull<u8>, key: K, value: V) -> InsertResult<K, V> {
+    unsafe fn insert_rec(
+        &mut self,
+        node: NonNull<u8>,
+        key: K,
+        value: V,
+        slot: &mut *mut V,
+    ) -> InsertResult<K, V> {
         let hdr = &*(node.as_ptr() as *const NodeHdr);
         match hdr.tag {
-            NodeTag::Leaf => self.leaf_insert_or_split(node, key, value),
+            NodeTag::Leaf => self.leaf_insert_or_split(node, key, value, slot),
             NodeTag::Branch => {
                 let (child, child_idx) = self.child_for_key(node, &key);
-                match self.insert_rec(child, key, value) {
+                match self.insert_rec(child, key, value, slot) {
                     InsertResult::NoSplit(old) => InsertResult::NoSplit(old),
                     InsertResult::Split {
                         sep_key,
@@ -91,14 +110,6 @@ impl<K: Ord + Clone, V> BPlusTreeMap<K, V> {
         *children = old_root.as_ptr();
         *children.add(1) = right.as_ptr();
         self.root = Some(branch);
-    }
-
-    pub fn batch_insert(&mut self, items: Vec<(K, V)>) -> BTreeResult<Vec<Option<V>>> {
-        let mut old_vals = Vec::with_capacity(items.len());
-        for (k, v) in items {
-            old_vals.push(self.insert(k, v));
-        }
-        Ok(old_vals)
     }
 
     /// Absorb a child split into `node` at `child_idx`: insert the separator
@@ -210,7 +221,7 @@ impl<K: Ord + Clone, V> BPlusTreeMap<K, V> {
         cur_len: usize,
         key: K,
         value: V,
-    ) {
+    ) -> *mut V {
         self.shift_right(
             parts.keys_ptr as *mut K,
             parts.vals_ptr as *mut V,
@@ -225,6 +236,7 @@ impl<K: Ord + Clone, V> BPlusTreeMap<K, V> {
             value,
         );
         (*parts.hdr).len = (cur_len + 1) as u16;
+        parts.vals_ptr.add(idx) as *mut V
     }
     /// Lean: `leafInsertOrSplit_noSplit` and `leafInsertOrSplit_split`
     /// (`Proofs/Leaf.lean`) for the shapes; `leafInsertOrSplit_noSplit_eq` and
@@ -234,6 +246,7 @@ impl<K: Ord + Clone, V> BPlusTreeMap<K, V> {
         leaf: NonNull<u8>,
         key: K,
         value: V,
+        slot: &mut *mut V,
     ) -> InsertResult<K, V> {
         let parts = layout::carve_leaf::<K, V>(leaf, &self.leaf_layout);
         let len = (*parts.hdr).len as usize;
@@ -243,11 +256,12 @@ impl<K: Ord + Clone, V> BPlusTreeMap<K, V> {
                 let vptr = parts.vals_ptr.add(idx) as *mut V;
                 let old = core::ptr::read(vptr);
                 core::ptr::write(vptr, value);
+                *slot = vptr;
                 InsertResult::NoSplit(Some(old))
             }
             Err(idx) => {
                 if len < self.leaf_layout.cap as usize {
-                    self.insert_into_leaf_slot(parts, idx, len, key, value);
+                    *slot = self.insert_into_leaf_slot(parts, idx, len, key, value);
                     return InsertResult::NoSplit(None);
                 }
 
@@ -259,12 +273,12 @@ impl<K: Ord + Clone, V> BPlusTreeMap<K, V> {
                 // key.
                 let (right, sep) = self.split_leaf(leaf);
                 let left_len = self.node_len(leaf);
-                if key < sep {
-                    self.insert_into_leaf_slot(parts, idx, left_len, key, value);
+                *slot = if key < sep {
+                    self.insert_into_leaf_slot(parts, idx, left_len, key, value)
                 } else {
                     let r = layout::carve_leaf::<K, V>(right, &self.leaf_layout);
-                    self.insert_into_leaf_slot(r, idx - left_len, len - left_len, key, value);
-                }
+                    self.insert_into_leaf_slot(r, idx - left_len, len - left_len, key, value)
+                };
                 InsertResult::Split {
                     sep_key: sep,
                     right,

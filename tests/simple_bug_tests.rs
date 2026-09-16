@@ -10,7 +10,7 @@ fn test_linked_list_integrity() {
     insert_with_multiplier(&mut tree, 20, 10);
 
     // Collect items via iteration (uses linked list)
-    let items_via_iteration: Vec<_> = tree.items().map(|(k, _)| *k).collect();
+    let items_via_iteration: Vec<_> = tree.iter().map(|(k, _)| *k).collect();
 
     // Collect items via tree traversal (different path)
     let mut items_via_tree = Vec::new();
@@ -32,7 +32,7 @@ fn test_linked_list_integrity() {
     // Now delete some items and retest
     deletion_range_attack(&mut tree, 50, 150);
 
-    let items_after_delete: Vec<_> = tree.items().map(|(k, _)| *k).collect();
+    let items_after_delete: Vec<_> = tree.iter().map(|(k, _)| *k).collect();
 
     // Check that iteration is still sorted
     for i in 1..items_after_delete.len() {
@@ -104,8 +104,8 @@ fn test_iterator_consistency() {
     insert_sequential_range(&mut tree, 10);
 
     // Multiple iterations should give same results
-    let iter1: Vec<_> = tree.items().map(|(k, _)| *k).collect();
-    let iter2: Vec<_> = tree.items().map(|(k, _)| *k).collect();
+    let iter1: Vec<_> = tree.iter().map(|(k, _)| *k).collect();
+    let iter2: Vec<_> = tree.iter().map(|(k, _)| *k).collect();
 
     assert_eq!(iter1, iter2, "Multiple iterations should be consistent");
 

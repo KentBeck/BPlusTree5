@@ -6,7 +6,7 @@ use bplustree::BPlusTreeMap;
 use std::ops::Bound;
 
 fn sample() -> BPlusTreeMap<String, u32> {
-    let mut map = BPlusTreeMap::new(4).unwrap();
+    let mut map = BPlusTreeMap::with_capacity(4);
     for (i, w) in ["apple", "banana", "cherry", "date", "elder", "fig", "grape"]
         .iter()
         .enumerate()
@@ -22,7 +22,7 @@ fn get_and_contains_by_str() {
     assert_eq!(map.get("cherry"), Some(&2));
     assert!(map.contains_key("fig"));
     assert!(!map.contains_key("kiwi"));
-    assert_eq!(map.get_item("kiwi").ok(), None);
+    assert_eq!(map.get("kiwi"), None);
 }
 
 #[test]
@@ -79,11 +79,11 @@ fn map_is_send_and_sync_when_contents_are() {
 
 #[test]
 fn mutable_iteration() {
-    let mut map = BPlusTreeMap::new(4).unwrap();
+    let mut map = BPlusTreeMap::with_capacity(4);
     for i in 0..1000u32 {
         map.insert(i, i);
     }
-    for (k, v) in map.items_mut() {
+    for (k, v) in map.iter_mut() {
         *v += *k;
     }
     for v in map.values_mut().rev() {

@@ -1,9 +1,9 @@
 # Experiment: BPlusTreeMap inside Deno's npm resolver
 
 A real-situation test of `BPlusTreeMap`: take a production project whose
-core algorithm is built on `std::collections::BTreeMap`, swap in our tree
-through the `bplustree-compat` shim, run the project's tests, then run the
-project's own benchmarks with both maps interleaved.
+core algorithm is built on `std::collections::BTreeMap`, swap in our tree,
+run the project's tests, then run the project's own benchmarks with both
+maps interleaved.
 
 ## Choosing the host
 
@@ -28,9 +28,9 @@ without building the runtime.
 
 `bplustree.patch` (against Deno commit in `DENO_COMMIT`) changes seven
 lines of source: every `use std::collections::BTreeMap` / `BTreeSet` in
-`libs/npm` becomes `use bplustree_compat::BTreeMap` / `BTreeSet`, and the
-crate gains a path dependency on `compat/`. Nothing else in the resolver
-changed. The maps involved:
+`libs/npm` becomes `use bplustree::BPlusTreeMap as BTreeMap` /
+`BPlusTreeSet as BTreeSet`, and the crate gains a path dependency on this
+one. Nothing else in the resolver changed. The maps involved:
 
 - `Node::children: BTreeMap<StackString, NodeId>` (one per graph node, cloned)
 - `PeersResolution::{resolved_peers, missing_peers}`
@@ -38,25 +38,37 @@ changed. The maps involved:
 - `peer_fallbacks`, the `VersionReqsByVersion` nested maps, and the
   tracing / snapshot maps and sets.
 
-Methods the resolver relies on that `BPlusTreeMap` did not have and the
-shim (or the library) had to supply: `entry().or_default()`, `iter_mut`,
-`retain`, `Clone`, `Debug`, `Hash`, `from([...])`, owned `into_iter`,
-`BTreeSet`, and serde derives.
+Methods the resolver relies on that the library did not have:
+`entry().or_default()`, `iter_mut`, `retain`, `Clone`, `Debug`, `Hash`,
+`from([...])`, owned `into_iter`, an ordered set, and serde.
 
 ## Library changes the experiment forced
 
-Before the swap could compile, the library itself needed:
+The first run of this experiment went through a separate shim crate that
+composed the missing pieces out of the tree's primitives. That shim is
+gone: the library now has the standard library's API itself, and the
+substitution is a plain import change.
 
-1. Lookups by borrowed key (`get`, `remove`, `range` … over
-   `Q: ?Sized` where `K: Borrow<Q>`), matching std.
+What had to be built:
+
+1. Lookups by borrowed key (`get`, `remove`, `range` … over `Q: ?Sized`
+   where `K: Borrow<Q>`), matching std.
 2. `Send`/`Sync` impls (the map holds raw pointers, so it was neither).
-3. `items_mut`, `values_mut`, `range_mut`.
-4. A lazy root: the constructor no longer allocates a leaf, so an empty
-   map is free. The resolver creates many maps that stay empty.
+3. `iter_mut`, `values_mut`, `range_mut`.
+4. A lazy root: the constructor allocates no leaf, so an empty map is
+   free. The resolver creates many maps that stay empty.
+5. A native entry API. The lookup that decides vacant from occupied keeps
+   the value's slot, and filling a vacant entry descends once because
+   the insert hands back the slot it wrote.
+6. A native owning iterator that walks the leaf chain and frees each leaf
+   as it empties, where the shim popped the first entry repeatedly at a
+   descent apiece.
+7. `retain`, `append`, `split_off`, `pop_first`/`pop_last`,
+   `remove_entry` (one descent: the key is read out of its slot), the
+   ordered set, the trait impls, and optional serde.
 
-The compat crate composes the rest (entry API, `retain`, `append`,
-`split_off`, `pop_first/last`, owned iteration, trait impls) from those
-primitives and is checked against std by a differential test.
+`tests/std_compatibility.rs` drives this map and `std::collections::BTreeMap`
+through the same operations and asserts the answers agree.
 
 ## Results
 

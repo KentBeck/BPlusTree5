@@ -32,7 +32,7 @@ fn test_linked_list_cycle_attack() {
         // Verify no cycle by iterating and checking we don't see duplicates
         let mut seen = HashSet::new();
         let mut count = 0;
-        for (k, _) in tree.items() {
+        for (k, _) in tree.iter() {
             if !seen.insert(*k) {
                 panic!(
                     "ATTACK SUCCESSFUL: Linked list has a cycle! Duplicate key: {}",
@@ -63,7 +63,7 @@ fn test_concurrent_iteration_modification_attack() {
     let mut iter_count = 0;
     let mut last_key = None;
 
-    for (k, _v) in tree.items() {
+    for (k, _v) in tree.iter() {
         iter_count += 1;
 
         // Check for out-of-order iteration
@@ -107,7 +107,7 @@ fn test_split_during_iteration_attack() {
 
     // Start iterating and track what we see
     let mut seen_keys = Vec::new();
-    for (k, _) in tree.items() {
+    for (k, _) in tree.iter() {
         seen_keys.push(*k);
     }
 
@@ -118,7 +118,7 @@ fn test_split_during_iteration_attack() {
 
     // Iterate again and check consistency
     let mut new_seen_keys = Vec::new();
-    for (k, _) in tree.items() {
+    for (k, _) in tree.iter() {
         new_seen_keys.push(*k);
     }
 
@@ -150,10 +150,7 @@ fn test_range_iterator_boundary_attack() {
     }
 
     // Test 1: Range exactly matching a node boundary
-    let range1: Vec<_> = tree
-        .items_range(Some(&10), Some(&30))
-        .map(|(k, _)| *k)
-        .collect();
+    let range1: Vec<_> = tree.range(10..30).map(|(k, _)| *k).collect();
     if range1 != vec![10, 15, 20, 25] {
         panic!(
             "ATTACK SUCCESSFUL: Range query returned wrong items: {:?}",
@@ -162,10 +159,7 @@ fn test_range_iterator_boundary_attack() {
     }
 
     // Test 2: Range with non-existent start key
-    let range2: Vec<_> = tree
-        .items_range(Some(&7), Some(&23))
-        .map(|(k, _)| *k)
-        .collect();
+    let range2: Vec<_> = tree.range(7..23).map(|(k, _)| *k).collect();
     if range2 != vec![10, 15, 20] {
         panic!(
             "ATTACK SUCCESSFUL: Range with non-existent start failed: {:?}",
@@ -174,19 +168,13 @@ fn test_range_iterator_boundary_attack() {
     }
 
     // Test 3: Range that spans exactly one leaf
-    let range3: Vec<_> = tree
-        .items_range(Some(&15), Some(&16))
-        .map(|(k, _)| *k)
-        .collect();
+    let range3: Vec<_> = tree.range(15..16).map(|(k, _)| *k).collect();
     if range3 != vec![15] {
         panic!("ATTACK SUCCESSFUL: Single item range failed: {:?}", range3);
     }
 
     // Test 4: Empty range
-    let range4: Vec<_> = tree
-        .items_range(Some(&100), Some(&200))
-        .map(|(k, _)| *k)
-        .collect();
+    let range4: Vec<_> = tree.range(100..200).map(|(k, _)| *k).collect();
     if !range4.is_empty() {
         panic!(
             "ATTACK SUCCESSFUL: Empty range returned items: {:?}",
@@ -195,10 +183,7 @@ fn test_range_iterator_boundary_attack() {
     }
 
     // Test 5: Backwards range (should be empty)
-    let range5: Vec<_> = tree
-        .items_range(Some(&30), Some(&10))
-        .map(|(k, _)| *k)
-        .collect();
+    let range5: Vec<_> = tree.range(30..10).map(|(k, _)| *k).collect();
     if !range5.is_empty() {
         panic!(
             "ATTACK SUCCESSFUL: Backwards range returned items: {:?}",
@@ -230,7 +215,7 @@ fn test_linked_list_fragmentation_attack() {
     let mut prev_key = None;
     let mut count = 0;
 
-    for (k, _) in tree.items() {
+    for (k, _) in tree.iter() {
         count += 1;
 
         if let Some(prev) = prev_key {
@@ -272,9 +257,9 @@ fn test_iterator_state_corruption_attack() {
     insert_with_multiplier(&mut tree, 40, 2);
 
     // Create multiple iterators at different positions
-    let iter1 = tree.items();
-    let iter2 = tree.items_range(Some(&20), Some(&60));
-    let iter3 = tree.items_range(Some(&50), None);
+    let iter1 = tree.iter();
+    let iter2 = tree.range(20..60);
+    let iter3 = tree.range(50..);
 
     // Collect from all iterators
     let items1: Vec<_> = iter1.map(|(k, _)| *k).collect();
@@ -349,7 +334,7 @@ fn test_force_linked_list_corruption() {
 
         // Check for corruption
         let mut last = None;
-        for (k, _) in tree.items() {
+        for (k, _) in tree.iter() {
             if let Some(l) = last {
                 if k <= &l {
                     panic!(

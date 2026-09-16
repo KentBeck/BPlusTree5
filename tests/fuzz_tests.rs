@@ -19,7 +19,7 @@ fn fuzz_test_bplustree() {
     for branching_factor in 4..=10 {
         println!("\n=== Testing branching factor {} ===", branching_factor);
 
-        let mut bplustree = BPlusTreeMap::new(branching_factor).unwrap();
+        let mut bplustree = BPlusTreeMap::with_capacity(branching_factor);
         let mut btree_map = BTreeMap::new();
         let mut operations = Vec::new();
 
@@ -84,7 +84,7 @@ fn fuzz_test_bplustree() {
             }
 
             // Verify iteration order matches
-            let bplus_slice: Vec<_> = bplustree.items().collect();
+            let bplus_slice: Vec<_> = bplustree.iter().collect();
             let btree_slice: Vec<_> = btree_map.iter().collect();
 
             if bplus_slice.len() != btree_slice.len() {
@@ -153,7 +153,7 @@ fn fuzz_test_with_random_keys() {
             branching_factor
         );
 
-        let mut bplustree = BPlusTreeMap::new(branching_factor).unwrap();
+        let mut bplustree = BPlusTreeMap::with_capacity(branching_factor);
         let mut btree_map = BTreeMap::new();
         let mut operations = Vec::new();
         let mut inserted_keys = HashSet::new();
@@ -256,7 +256,7 @@ fn fuzz_test_with_updates() {
             branching_factor
         );
 
-        let mut bplustree = BPlusTreeMap::new(branching_factor).unwrap();
+        let mut bplustree = BPlusTreeMap::with_capacity(branching_factor);
         let mut btree_map = BTreeMap::new();
         let mut operations = Vec::new();
 
@@ -341,7 +341,7 @@ fn fuzz_test_timed() {
                 break;
             }
 
-            let mut bplustree = BPlusTreeMap::new(branching_factor).unwrap();
+            let mut bplustree = BPlusTreeMap::with_capacity(branching_factor);
             let mut btree_map = BTreeMap::new();
             let mut operations = Vec::new();
 

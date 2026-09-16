@@ -10,7 +10,7 @@ fn main() {
 
     // Phase 1: Build the tree
     println!("Phase 1: Building tree with {} items...", n);
-    let mut map = BPlusTreeMap::new(cap).expect("new");
+    let mut map = BPlusTreeMap::with_capacity(cap);
 
     let mut state: u64 = 0x123456789abcdef0;
     for i in 0..n {
@@ -24,7 +24,7 @@ fn main() {
     // Phase 2: Forward iteration (this is what we're profiling)
     println!("Phase 2: Forward iteration...");
     let mut count = 0;
-    for (k, v) in map.items() {
+    for (k, v) in map.iter() {
         black_box(k);
         black_box(v);
         count += 1;
@@ -34,7 +34,7 @@ fn main() {
     // Phase 3: Backward iteration
     println!("Phase 3: Backward iteration...");
     let mut count = 0;
-    for (k, v) in map.items().rev() {
+    for (k, v) in map.iter().rev() {
         black_box(k);
         black_box(v);
         count += 1;

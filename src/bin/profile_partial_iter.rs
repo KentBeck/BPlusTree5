@@ -33,7 +33,7 @@ fn main() {
 
     // Build B+ tree
     println!("Building BPlusTreeMap...");
-    let mut bplus = BPlusTreeMap::new(cap).expect("new bplustree");
+    let mut bplus = BPlusTreeMap::with_capacity(cap);
     for &(k, v) in &dataset {
         bplus.insert(k, v);
     }

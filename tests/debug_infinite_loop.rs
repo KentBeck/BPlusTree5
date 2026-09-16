@@ -7,7 +7,7 @@ use test_utils::*;
 #[test]
 fn test_empty_tree_leaf_count() {
     println!("Creating tree...");
-    let tree: BPlusTreeMap<i32, String> = BPlusTreeMap::new(4).unwrap();
+    let tree: BPlusTreeMap<i32, String> = BPlusTreeMap::with_capacity(4);
 
     println!("Getting leaf count...");
     let count = tree.leaf_count();
@@ -19,14 +19,14 @@ fn test_empty_tree_leaf_count() {
 #[test]
 fn test_tree_creation_only() {
     println!("Creating tree...");
-    let _tree: BPlusTreeMap<i32, String> = BPlusTreeMap::new(4).unwrap();
+    let _tree: BPlusTreeMap<i32, String> = BPlusTreeMap::with_capacity(4);
     println!("Tree created successfully!");
 }
 
 #[test]
 fn test_single_insertion() {
     println!("Creating tree...");
-    let mut tree: BPlusTreeMap<i32, String> = BPlusTreeMap::new(4).unwrap();
+    let mut tree: BPlusTreeMap<i32, String> = BPlusTreeMap::with_capacity(4);
 
     println!("Inserting one item...");
     tree.insert(1, "one".to_string());
@@ -41,7 +41,7 @@ fn test_single_insertion() {
 #[test]
 fn test_split_balance() {
     println!("Testing split balance with capacity 5...");
-    let mut tree: BPlusTreeMap<i32, String> = BPlusTreeMap::new(5).unwrap();
+    let mut tree: BPlusTreeMap<i32, String> = BPlusTreeMap::with_capacity(5);
 
     // Insert enough items to force splits and see the distribution
     insert_sequential_range(&mut tree, 20);

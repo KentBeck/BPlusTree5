@@ -11,7 +11,7 @@ use test_utils::*;
 fn test_iteration_order_after_deletions() {
     println!("=== ITERATION ORDER AFTER DELETIONS TEST ===");
 
-    let mut tree: BPlusTreeMap<i32, String> = BPlusTreeMap::new(6).unwrap();
+    let mut tree: BPlusTreeMap<i32, String> = BPlusTreeMap::with_capacity(6);
 
     // Create a tree with various operations to test iteration safety
     for i in 0..1000 {
@@ -22,7 +22,7 @@ fn test_iteration_order_after_deletions() {
     deletion_range_attack(&mut tree, 100, 200);
 
     // Test that iteration works correctly with type conversions
-    let items: Vec<_> = tree.items().collect();
+    let items: Vec<_> = tree.iter().collect();
     println!("Iteration collected {} items", items.len());
 
     // Verify iteration is working properly (1000 - 100 removed = 900)
@@ -50,7 +50,7 @@ fn test_iteration_order_after_deletions() {
 fn test_integer_overflow_prevention() {
     println!("=== INTEGER OVERFLOW PREVENTION TEST ===");
 
-    let mut tree: BPlusTreeMap<i32, String> = BPlusTreeMap::new(4).unwrap();
+    let mut tree: BPlusTreeMap<i32, String> = BPlusTreeMap::with_capacity(4);
 
     // Test with large numbers that could cause overflow in calculations
     let large_numbers = [i32::MAX - 1000, i32::MAX - 100, i32::MAX - 10, i32::MAX - 1];
@@ -71,7 +71,7 @@ fn test_integer_overflow_prevention() {
     }
 
     // Test operations with these large numbers
-    let items: Vec<_> = tree.items().map(|(k, _)| *k).collect();
+    let items: Vec<_> = tree.iter().map(|(k, _)| *k).collect();
     println!("Large numbers in tree: {:?}", items);
 
     // Test range operations with large numbers
@@ -91,7 +91,7 @@ fn test_integer_overflow_prevention() {
 fn test_u32_key_operations() {
     println!("=== U32 KEY OPERATIONS TEST ===");
 
-    let mut tree: BPlusTreeMap<u32, String> = BPlusTreeMap::new(4).unwrap();
+    let mut tree: BPlusTreeMap<u32, String> = BPlusTreeMap::with_capacity(4);
 
     // Test with u32 keys to stress NodeId conversions
     let test_keys = [0u32, 1000, 10000, 100000, 1000000];

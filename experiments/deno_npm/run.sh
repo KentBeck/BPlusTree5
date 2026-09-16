@@ -2,9 +2,9 @@
 # Reproduce the deno_npm substitution experiment.
 #
 # Clones Deno at the pinned commit, applies bplustree.patch (which swaps the
-# std BTreeMap/BTreeSet in libs/npm for bplustree_compat), runs deno_npm's
-# test suite on the B+ tree, then builds the divan benchmark binary for
-# both the std baseline and the B+ tree and runs them interleaved.
+# std BTreeMap/BTreeSet in libs/npm for this crate's), runs deno_npm's test
+# suite on the B+ tree, then builds the divan benchmark binary for both the
+# std baseline and the B+ tree and runs them interleaved.
 #
 # Usage: experiments/deno_npm/run.sh [work-dir] [rounds]
 set -euo pipefail
@@ -24,10 +24,10 @@ fi
 cd "$WORK/deno"
 git checkout -q -B baseline "$DENO_COMMIT"
 
-# The patch names the compat crate by absolute path; point it at this checkout.
+# The patch names this crate by absolute path; point it at this checkout.
 git checkout -q -B bplustree baseline
-sed "s|/home/user/BPlusTree5/compat|$REPO_ROOT/compat|" "$HERE/bplustree.patch" | git apply -
-git commit -qam "Use bplustree_compat::BTreeMap in deno_npm"
+sed "s|/home/user/BPlusTree5|$REPO_ROOT|" "$HERE/bplustree.patch" | git apply -
+git commit -qam "Use bplustree::BPlusTreeMap in deno_npm"
 
 echo "== deno_npm tests on the B+ tree"
 cargo test -p deno_npm 2>&1 | grep -E "^test result"

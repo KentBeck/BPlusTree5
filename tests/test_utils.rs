@@ -7,35 +7,32 @@
 use bplustree::BPlusTreeMap;
 
 // ============================================================================
-// TREE CREATION UTILITIES - Replace 185 instances of BPlusTreeMap::new()
+// TREE CREATION UTILITIES
 // ============================================================================
 
 /// Standard tree with capacity 4 (most common pattern)
 pub fn create_tree_4() -> BPlusTreeMap<i32, String> {
-    BPlusTreeMap::new(4).expect("Failed to create tree with capacity 4")
+    BPlusTreeMap::with_capacity(4)
 }
 
 /// Standard tree with capacity 5 (for odd capacity testing)
 pub fn create_tree_5() -> BPlusTreeMap<i32, String> {
-    BPlusTreeMap::new(5).expect("Failed to create tree with capacity 5")
+    BPlusTreeMap::with_capacity(5)
 }
 
 /// Standard tree with capacity 6 (for specific testing scenarios)
 pub fn create_tree_6() -> BPlusTreeMap<i32, String> {
-    BPlusTreeMap::new(6).expect("Failed to create tree with capacity 6")
+    BPlusTreeMap::with_capacity(6)
 }
 
 /// Generic tree creation with custom capacity
 pub fn create_tree_capacity(capacity: usize) -> BPlusTreeMap<i32, String> {
-    BPlusTreeMap::new(capacity).expect(&format!("Failed to create tree with capacity {}", capacity))
+    BPlusTreeMap::with_capacity(capacity)
 }
 
 /// Generic integer tree creation with custom capacity
 pub fn create_tree_capacity_int(capacity: usize) -> BPlusTreeMap<i32, i32> {
-    BPlusTreeMap::new(capacity).expect(&format!(
-        "Failed to create integer tree with capacity {}",
-        capacity
-    ))
+    BPlusTreeMap::with_capacity(capacity)
 }
 
 // ============================================================================
@@ -159,7 +156,7 @@ pub fn deletion_range_attack(tree: &mut BPlusTreeMap<i32, String>, start: usize,
 
 /// Verify tree ordering after operations
 pub fn verify_ordering(tree: &BPlusTreeMap<i32, String>) {
-    let items: Vec<_> = tree.items().collect();
+    let items: Vec<_> = tree.iter().collect();
     for i in 1..items.len() {
         if items[i - 1].0 >= items[i].0 {
             panic!("Items out of order after operations!");

@@ -1,48 +1,43 @@
 diff --git a/Cargo.lock b/Cargo.lock
-index 613aa196..0efd0525 100644
+index 613aa196..9025beb1 100644
 --- a/Cargo.lock
 +++ b/Cargo.lock
-@@ -758,6 +758,18 @@ dependencies = [
+@@ -758,6 +758,13 @@ dependencies = [
   "syn 2.0.117",
  ]
  
 +[[package]]
 +name = "bplustree"
 +version = "0.1.0"
-+
-+[[package]]
-+name = "bplustree-compat"
-+version = "0.1.0"
 +dependencies = [
-+ "bplustree",
 + "serde",
 +]
 +
  [[package]]
  name = "brotli"
  version = "6.0.0"
-@@ -2995,6 +3007,7 @@ name = "deno_npm"
+@@ -2995,6 +3002,7 @@ name = "deno_npm"
  version = "0.70.0"
  dependencies = [
   "async-trait",
-+ "bplustree-compat",
++ "bplustree",
   "bytemuck",
   "capacity_builder",
   "chrono",
 diff --git a/libs/npm/Cargo.toml b/libs/npm/Cargo.toml
-index d4c1c550..d2c3d9ee 100644
+index d4c1c550..01e19d5d 100644
 --- a/libs/npm/Cargo.toml
 +++ b/libs/npm/Cargo.toml
 @@ -19,6 +19,7 @@ tracing = []
  
  [dependencies]
  async-trait.workspace = true
-+bplustree-compat = { path = "/home/user/BPlusTree5/compat", features = ["serde"] }
++bplustree = { path = "/home/user/BPlusTree5", features = ["serde"] }
  bytemuck = { workspace = true, features = ["aarch64_simd", "avx512_simd", "must_cast"] }
  capacity_builder.workspace = true
  chrono = { workspace = true, default-features = false, features = ["serde"] }
 diff --git a/libs/npm/lib.rs b/libs/npm/lib.rs
-index 463f8b9d..22350b07 100644
+index 463f8b9d..73ff847f 100644
 --- a/libs/npm/lib.rs
 +++ b/libs/npm/lib.rs
 @@ -5,7 +5,7 @@
@@ -50,24 +45,24 @@ index 463f8b9d..22350b07 100644
  
  use std::cmp::Ordering;
 -use std::collections::BTreeMap;
-+use bplustree_compat::BTreeMap;
++use bplustree::BPlusTreeMap as BTreeMap;
  use std::collections::HashMap;
  use std::collections::HashSet;
  
 diff --git a/libs/npm/resolution/common.rs b/libs/npm/resolution/common.rs
-index 85cb69c0..0d901e29 100644
+index 85cb69c0..50762f82 100644
 --- a/libs/npm/resolution/common.rs
 +++ b/libs/npm/resolution/common.rs
 @@ -1,6 +1,6 @@
  // Copyright 2018-2026 the Deno authors. MIT license.
  
 -use std::collections::BTreeSet;
-+use bplustree_compat::BTreeSet;
++use bplustree::BPlusTreeSet as BTreeSet;
  use std::collections::HashMap;
  use std::sync::Arc;
  
 diff --git a/libs/npm/resolution/graph.rs b/libs/npm/resolution/graph.rs
-index ff032b31..eb7c941a 100644
+index ff032b31..0a354451 100644
 --- a/libs/npm/resolution/graph.rs
 +++ b/libs/npm/resolution/graph.rs
 @@ -3,7 +3,7 @@
@@ -75,7 +70,7 @@ index ff032b31..eb7c941a 100644
  use std::cell::Cell;
  use std::cell::RefCell;
 -use std::collections::BTreeMap;
-+use bplustree_compat::BTreeMap;
++use bplustree::BPlusTreeMap as BTreeMap;
  use std::collections::HashMap;
  use std::collections::VecDeque;
  use std::collections::hash_map::DefaultHasher;
@@ -84,7 +79,7 @@ index ff032b31..eb7c941a 100644
          .into_iter()
          .filter(|name| should_bubble(name))
 -        .collect::<std::collections::BTreeSet<_>>()
-+        .collect::<bplustree_compat::BTreeSet<_>>()
++        .collect::<bplustree::BPlusTreeSet<_>>()
          .into_iter()
          .collect();
  
@@ -93,12 +88,12 @@ index ff032b31..eb7c941a 100644
  #[cfg(test)]
  mod test {
 -  use std::collections::BTreeSet;
-+  use bplustree_compat::BTreeSet;
++  use bplustree::BPlusTreeSet as BTreeSet;
    use std::collections::HashSet;
    use std::sync::Arc;
  
 diff --git a/libs/npm/resolution/snapshot.rs b/libs/npm/resolution/snapshot.rs
-index 58d00dcc..17ed3ed9 100644
+index 58d00dcc..f417c186 100644
 --- a/libs/npm/resolution/snapshot.rs
 +++ b/libs/npm/resolution/snapshot.rs
 @@ -1,7 +1,7 @@
@@ -106,20 +101,20 @@ index 58d00dcc..17ed3ed9 100644
  
 -use std::collections::BTreeMap;
 -use std::collections::BTreeSet;
-+use bplustree_compat::BTreeMap;
-+use bplustree_compat::BTreeSet;
++use bplustree::BPlusTreeMap as BTreeMap;
++use bplustree::BPlusTreeSet as BTreeSet;
  use std::collections::HashMap;
  use std::collections::HashSet;
  use std::collections::VecDeque;
 diff --git a/libs/npm/resolution/tracing/mod.rs b/libs/npm/resolution/tracing/mod.rs
-index 7eceb5a2..a0170c02 100644
+index 7eceb5a2..ee13c4f9 100644
 --- a/libs/npm/resolution/tracing/mod.rs
 +++ b/libs/npm/resolution/tracing/mod.rs
 @@ -1,6 +1,6 @@
  // Copyright 2018-2026 the Deno authors. MIT license.
  
 -use std::collections::BTreeMap;
-+use bplustree_compat::BTreeMap;
++use bplustree::BPlusTreeMap as BTreeMap;
  
  use serde::Serialize;
  

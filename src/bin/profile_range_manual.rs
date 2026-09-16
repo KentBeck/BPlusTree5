@@ -4,7 +4,7 @@ use std::time::Instant;
 
 fn main() {
     let n = 1_000_000;
-    let mut map = BPlusTreeMap::new(128).expect("capacity");
+    let mut map = BPlusTreeMap::with_capacity(128);
 
     println!("Building tree with {} elements...", n);
     for i in 0..n {

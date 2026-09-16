@@ -1,3 +1,26 @@
+//! A B+ tree map with the API of [`std::collections::BTreeMap`].
+//!
+//! [`BPlusTreeMap`] stores its entries in fixed-size leaf and branch nodes,
+//! each a single raw allocation, with the leaves linked into a doubly
+//! linked chain. The public surface is the standard library's: the same
+//! method names, signatures, iterator types, and trait impls, so a project
+//! can swap `std::collections::BTreeMap` for this type and keep compiling.
+//!
+//! Three deliberate differences:
+//!
+//! * `K: Clone` is required wherever std asks only for `K: Ord`, because a
+//!   split copies a key up into a branch separator.
+//! * Node capacities are chosen for `K` and `V` by [`BPlusTreeMap::new`]
+//!   and cannot be set through the public API.
+//! * [`BPlusTreeMap::new`] is not a `const fn`, so a map cannot be built in
+//!   a constant. It allocates nothing until the first insert either way.
+//!
+//! Methods the standard library still has behind a nightly feature gate
+//! (`extract_if`, `try_insert`, the cursor API, the allocator parameter)
+//! are not implemented.
+//!
+//! [`std::collections::BTreeMap`]: https://doc.rust-lang.org/std/collections/struct.BTreeMap.html
+
 #![no_std]
 
 extern crate alloc;
@@ -5,30 +28,54 @@ extern crate alloc;
 use core::marker::PhantomData;
 use core::ptr::{self, NonNull};
 
+mod bulk;
 mod common;
 mod delete;
+mod entry;
 mod get;
 mod insert;
+#[cfg(any(test, feature = "internal"))]
+mod internal;
 mod iterate;
 mod layout;
 mod node_alloc;
+mod owned;
+mod serde_impls;
+mod set;
+mod traits;
 
-#[cfg(feature = "compat_test_api")]
-pub use common::ShapeHasher;
+#[cfg(not(any(test, feature = "internal")))]
+use layout::{BranchLayout, LeafLayout, NodeHdr, NodeTag};
+use node_alloc::{free_branch_block, free_leaf_block};
+
 #[cfg(feature = "delete_profile")]
 pub use delete::DeleteProfile;
-pub use iterate::{Items, ItemsMut, Keys, Values, ValuesMut};
+pub use entry::{Entry, OccupiedEntry, VacantEntry};
+pub use iterate::{Iter, IterMut, Keys, Range, RangeMut, Values, ValuesMut};
+pub use owned::{IntoIter, IntoKeys, IntoValues};
+pub use set::BPlusTreeSet;
+
+/// Node internals, for this repository's own tests and benchmarks. Not
+/// public API; see [`internal`](crate::internal).
+#[cfg(any(test, feature = "internal"))]
+#[doc(hidden)]
+pub use common::ShapeHasher;
+#[cfg(any(test, feature = "internal"))]
+#[doc(hidden)]
 pub use layout::{align_up, BranchLayout, LeafLayout, NodeHdr, NodeTag};
-pub use node_alloc::{
-    alloc_branch_block, alloc_leaf_block, alloc_raw, dealloc_raw, free_branch_block,
-    free_leaf_block, init_branch_block, init_leaf_block,
-};
 
-/// Leaf key/value bytes targeted by [`BPlusTreeMap::recommended`].
-pub const RECOMMENDED_LEAF_PAYLOAD_BYTES: usize = 512;
+#[cfg(any(test, feature = "internal"))]
+#[doc(hidden)]
+pub const RECOMMENDED_LEAF_PAYLOAD_BYTES_INTERNAL: usize = RECOMMENDED_LEAF_PAYLOAD_BYTES;
+#[cfg(any(test, feature = "internal"))]
+#[doc(hidden)]
+pub const RECOMMENDED_BRANCH_PAYLOAD_BYTES_INTERNAL: usize = RECOMMENDED_BRANCH_PAYLOAD_BYTES;
 
-/// Branch key/child-pointer bytes targeted by [`BPlusTreeMap::recommended`].
-pub const RECOMMENDED_BRANCH_PAYLOAD_BYTES: usize = 4 * 1024;
+/// Leaf key/value bytes targeted by [`BPlusTreeMap::new`].
+const RECOMMENDED_LEAF_PAYLOAD_BYTES: usize = 512;
+
+/// Branch key/child-pointer bytes targeted by [`BPlusTreeMap::new`].
+const RECOMMENDED_BRANCH_PAYLOAD_BYTES: usize = 4 * 1024;
 
 const MIN_NODE_CAPACITY: usize = 4;
 
@@ -43,10 +90,10 @@ fn capacity_for_payload(target_bytes: usize, bytes_per_slot: usize) -> usize {
     }
 }
 
-/// Raw-memory B+ tree map with fixed-size leaf and branch nodes.
+/// An ordered map, stored as a B+ tree.
 ///
-/// This type only defines the top-level container and precomputed layouts.
-/// Nodes are single raw allocations carved according to these layouts.
+/// See the [crate documentation](crate) for how this differs from
+/// [`std::collections::BTreeMap`].
 pub struct BPlusTreeMap<K, V> {
     /// Root node (points to a node header at offset 0), or None if empty.
     root: Option<NonNull<u8>>,
@@ -80,16 +127,6 @@ impl<K, V> Drop for BPlusTreeMap<K, V> {
 }
 
 impl<K, V> BPlusTreeMap<K, V> {
-    /// Returns the configured layout for leaf nodes.
-    pub fn leaf_layout(&self) -> &LeafLayout {
-        &self.leaf_layout
-    }
-
-    /// Returns the configured layout for branch nodes.
-    pub fn branch_layout(&self) -> &BranchLayout {
-        &self.branch_layout
-    }
-
     /// Drop every key and value the subtree owns, then free its nodes.
     /// Used by `Drop` and `clear`, which own the whole tree; the incremental
     /// paths in `delete` instead free nodes whose contents have already moved
@@ -126,53 +163,14 @@ impl<K, V> BPlusTreeMap<K, V> {
     }
 }
 
-// =============================
-// Public API surface (compat scaffolding)
-// =============================
-// This section exists so the test suite imported from BPlusTree3 compiles
-// against this implementation: error types, Result aliases, and convenience
-// wrappers (get_item, remove_item, batch_insert, ...) over the real API.
-
-use alloc::format;
-use alloc::string::String;
-use core::fmt;
-
-#[derive(Debug)]
-pub enum BPlusTreeError {
-    InvalidCapacity(String),
-    KeyNotFound,
-    DataIntegrityError(String),
-    AllocationError(String),
-}
-
-impl fmt::Display for BPlusTreeError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            BPlusTreeError::InvalidCapacity(s) => write!(f, "InvalidCapacity: {}", s),
-            BPlusTreeError::KeyNotFound => write!(f, "Key not found"),
-            BPlusTreeError::DataIntegrityError(s) => write!(f, "DataIntegrityError: {}", s),
-            BPlusTreeError::AllocationError(s) => write!(f, "AllocationError: {}", s),
-        }
-    }
-}
-
-impl core::error::Error for BPlusTreeError {}
-
 impl<K: Ord + Clone, V> BPlusTreeMap<K, V> {
-    // ===== Compatibility constructors =====
-    pub fn new(capacity: usize) -> Result<Self, BPlusTreeError> {
-        Self::with_caps(capacity, capacity)
-    }
-
-    /// Construct with cache-oriented capacities derived from `K` and `V`.
+    /// An empty map.
     ///
-    /// The targets are 512 bytes of keys and values per leaf and 4 KiB of
-    /// keys and child pointers per branch. On a 64-bit target,
-    /// `BPlusTreeMap<u64, u64>` gets leaf/branch capacities of 32/256. Larger
-    /// element types produce smaller capacities instead of silently creating
-    /// much larger nodes.
-    pub fn recommended() -> Result<Self, BPlusTreeError> {
-        Self::with_payload_targets(
+    /// Node capacities are derived from the sizes of `K` and `V`: a leaf
+    /// targets 512 bytes of keys and values, a branch 4 KiB of keys and
+    /// child pointers. Nothing is allocated until the first insert.
+    pub fn new() -> Self {
+        Self::with_payload_targets_impl(
             RECOMMENDED_LEAF_PAYLOAD_BYTES,
             RECOMMENDED_BRANCH_PAYLOAD_BYTES,
         )
@@ -185,51 +183,70 @@ impl<K: Ord + Clone, V> BPlusTreeMap<K, V> {
     /// pointer, and alignment padding sit outside these targets. Capacities
     /// are clamped to the supported range of 4 through [`u16::MAX`], so a
     /// target can be exceeded when four entries of a large type do not fit.
-    pub fn with_payload_targets(
+    pub(crate) fn with_payload_targets_impl(
         leaf_payload_bytes: usize,
         branch_payload_bytes: usize,
-    ) -> Result<Self, BPlusTreeError> {
+    ) -> Self {
         let leaf_slot_bytes = core::mem::size_of::<K>().saturating_add(core::mem::size_of::<V>());
         let branch_slot_bytes =
             core::mem::size_of::<K>().saturating_add(core::mem::size_of::<*mut u8>());
         let leaf_cap = capacity_for_payload(leaf_payload_bytes, leaf_slot_bytes);
         let branch_cap = capacity_for_payload(branch_payload_bytes, branch_slot_bytes);
-        Self::with_caps(leaf_cap, branch_cap)
+        Self::with_capacities_impl(leaf_cap, branch_cap)
     }
 
     /// Construct with independent leaf and branch capacities (entries per
     /// node). Inserts shift half a leaf on average, so smaller leaves make
     /// inserts cheaper, while larger branches keep the tree shallow for
     /// lookups; decoupling the two lets a workload pick both.
-    pub fn with_caps(leaf_cap: usize, branch_cap: usize) -> Result<Self, BPlusTreeError> {
-        if leaf_cap < MIN_NODE_CAPACITY || branch_cap < MIN_NODE_CAPACITY {
-            return Err(BPlusTreeError::InvalidCapacity("capacity too small".into()));
-        }
+    ///
+    /// Panics if either capacity is below four, the smallest a node can
+    /// hold and still split and merge.
+    pub(crate) fn with_capacities_impl(leaf_cap: usize, branch_cap: usize) -> Self {
+        assert!(
+            leaf_cap >= MIN_NODE_CAPACITY && branch_cap >= MIN_NODE_CAPACITY,
+            "node capacity must be at least {MIN_NODE_CAPACITY}"
+        );
         let leaf_u16 = core::cmp::min(leaf_cap, u16::MAX as usize) as u16;
         let branch_u16 = core::cmp::min(branch_cap, u16::MAX as usize) as u16;
-        let leaf_layout = LeafLayout::compute_for_cap::<K, V>(leaf_u16, true);
-        let branch_layout = BranchLayout::compute_for_cap::<K>(branch_u16);
         // The root leaf is allocated by the first insert, so an empty map
         // costs nothing beyond its layouts.
-        Ok(Self {
+        Self {
             root: None,
             entry_count: 0,
             #[cfg(feature = "delete_profile")]
             delete_profile: DeleteProfile::default(),
-            leaf_layout,
-            branch_layout,
+            leaf_layout: LeafLayout::compute_for_cap::<K, V>(leaf_u16, true),
+            branch_layout: BranchLayout::compute_for_cap::<K>(branch_u16),
             _marker: PhantomData,
-        })
+        }
     }
 
+    /// An empty map with the same node capacities as this one, so that maps
+    /// derived from a map (`clone`, `split_off`) keep its shape.
+    pub(crate) fn empty_like(&self) -> Self {
+        Self {
+            root: None,
+            entry_count: 0,
+            #[cfg(feature = "delete_profile")]
+            delete_profile: DeleteProfile::default(),
+            leaf_layout: self.leaf_layout,
+            branch_layout: self.branch_layout,
+            _marker: PhantomData,
+        }
+    }
+
+    /// Whether the map holds no entries.
     pub fn is_empty(&self) -> bool {
         self.entry_count == 0
     }
 
+    /// The number of entries.
     pub fn len(&self) -> usize {
         self.entry_count
     }
 
+    /// Remove every entry.
     /// Lean: `clearH_sim` (`Proofs/HeapLedger.lean`): the store is empty
     /// afterwards; `runH_ledger` closes the books over any operation sequence.
     pub fn clear(&mut self) {
@@ -239,80 +256,5 @@ impl<K: Ord + Clone, V> BPlusTreeMap<K, V> {
                 self.drop_subtree(root);
             }
         }
-    }
-}
-
-// =============================
-// Enhanced error/result compatibility layer (stubs)
-// =============================
-
-pub type InitResult<T> = Result<T, BPlusTreeError>;
-pub type BTreeResult<T> = Result<T, BPlusTreeError>;
-pub type KeyResult<T> = Result<T, BPlusTreeError>;
-pub type ModifyResult<T> = Result<T, BPlusTreeError>;
-
-#[cfg(feature = "compat_test_api")]
-pub trait BTreeResultExt<T> {
-    fn with_context(self, _ctx: &str) -> Result<T, BPlusTreeError>;
-    fn with_operation(self, _op: &str) -> Result<T, BPlusTreeError>;
-    fn or_default_with_log(self) -> T
-    where
-        T: Default;
-}
-
-#[cfg(feature = "compat_test_api")]
-impl<T> BTreeResultExt<T> for Result<T, BPlusTreeError> {
-    fn with_context(self, _ctx: &str) -> Result<T, BPlusTreeError> {
-        self
-    }
-    fn with_operation(self, _op: &str) -> Result<T, BPlusTreeError> {
-        self
-    }
-    fn or_default_with_log(self) -> T
-    where
-        T: Default,
-    {
-        self.unwrap_or_default()
-    }
-}
-
-impl BPlusTreeError {
-    pub fn invalid_capacity(got: usize, min: usize) -> Self {
-        BPlusTreeError::InvalidCapacity(format!(
-            "Capacity {} is invalid (minimum required: {})",
-            got, min
-        ))
-    }
-    pub fn data_integrity(op: &str, why: &str) -> Self {
-        BPlusTreeError::DataIntegrityError(format!("{}: {}", op, why))
-    }
-    pub fn allocation_error(what: &str, why: &str) -> Self {
-        BPlusTreeError::AllocationError(format!("Failed to allocate {}: {}", what, why))
-    }
-}
-
-impl core::cmp::PartialEq for BPlusTreeError {
-    fn eq(&self, other: &Self) -> bool {
-        core::mem::discriminant(self) == core::mem::discriminant(other)
-    }
-}
-impl Eq for BPlusTreeError {}
-
-// Extra convenience/debug API stubs used in tests
-#[cfg(feature = "compat_test_api")]
-impl<K: Ord + Clone, V> BPlusTreeMap<K, V> {
-    /// Check every tree invariant, naming `op` in the error if any fails.
-    pub fn validate_for_operation(&self, op: &str) -> BTreeResult<()> {
-        self.check_invariants_detailed()
-            .map_err(|why| BPlusTreeError::data_integrity(op, &why))
-    }
-    pub fn try_get(&self, key: &K) -> KeyResult<&V> {
-        self.get_item(key)
-    }
-    pub fn try_insert(&mut self, key: K, value: V) -> BTreeResult<Option<V>> {
-        Ok(self.insert(key, value))
-    }
-    pub fn try_remove(&mut self, key: &K) -> ModifyResult<V> {
-        self.remove_item(key)
     }
 }

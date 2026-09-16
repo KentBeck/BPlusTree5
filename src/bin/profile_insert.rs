@@ -8,7 +8,7 @@ fn main() {
 
     println!("Profiling {} inserts with capacity {}", n, cap);
 
-    let mut map = BPlusTreeMap::new(cap).expect("new");
+    let mut map = BPlusTreeMap::with_capacity(cap);
 
     // Generate random-ish data using LCG
     let mut state: u64 = 0x123456789abcdef0;

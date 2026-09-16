@@ -18,7 +18,7 @@ fn main() {
 
     let key = |i: u64| i.wrapping_mul(0x9E3779B97F4A7C15);
 
-    let mut m = BPlusTreeMap::with_caps(leaf_cap, branch_cap).unwrap();
+    let mut m = BPlusTreeMap::with_capacities(leaf_cap, branch_cap);
     for i in 0..n as u64 {
         m.insert(key(i), i);
     }
@@ -35,7 +35,7 @@ fn main() {
         }
         "iter" => {
             for _ in 0..10 {
-                for (k, v) in m.items() {
+                for (k, v) in m.iter() {
                     sum = sum.wrapping_add(*k).wrapping_add(*v);
                 }
             }
@@ -50,5 +50,5 @@ fn main() {
         }
         other => panic!("unknown phase {other}"),
     }
-    black_box((sum, m.first()));
+    black_box((sum, m.first_key_value()));
 }

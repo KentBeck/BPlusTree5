@@ -2,7 +2,7 @@ use bplustree::BPlusTreeMap;
 use std::collections::BTreeMap;
 
 fn populate_maps(capacity: usize, data: &[i32]) -> (BPlusTreeMap<i32, i32>, BTreeMap<i32, i32>) {
-    let mut tree = BPlusTreeMap::new(capacity).unwrap();
+    let mut tree = BPlusTreeMap::with_capacity(capacity);
     let mut map = BTreeMap::new();
     for &k in data {
         tree.insert(k, k * 10);

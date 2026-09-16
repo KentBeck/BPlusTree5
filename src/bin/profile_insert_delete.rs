@@ -28,7 +28,7 @@ fn main() {
     println!("Starting insert workload (hot path)...");
 
     // Workload 1: Sequential inserts (many memmove operations)
-    let mut tree = BPlusTreeMap::new(capacity).expect("new tree");
+    let mut tree = BPlusTreeMap::with_capacity(capacity);
     for &key in &keys {
         black_box(tree.insert(key, key));
     }

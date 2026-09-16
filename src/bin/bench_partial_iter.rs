@@ -53,7 +53,7 @@ fn main() {
 
     // Build B+ tree
     println!("Building BPlusTreeMap...");
-    let mut bplus = BPlusTreeMap::new(cap).expect("new bplustree");
+    let mut bplus = BPlusTreeMap::with_capacity(cap);
     for &(k, v) in &dataset {
         bplus.insert(k, v);
     }
@@ -208,7 +208,7 @@ trait RangeIterableBenchmark {
 }
 
 impl RangeIterableBenchmark for BPlusTreeMap<u64, u64> {
-    type RangeIter<'a> = bplustree::Items<'a, u64, u64>;
+    type RangeIter<'a> = bplustree::Range<'a, u64, u64>;
     fn range_from(&self, key: u64) -> Self::RangeIter<'_> {
         self.range(key..)
     }

@@ -1,47 +1,60 @@
-use alloc::vec::Vec;
+use core::borrow::Borrow;
 
 use crate::layout;
-use crate::{BPlusTreeError, BPlusTreeMap, BTreeResult};
+use crate::BPlusTreeMap;
 
 impl<K: Ord + Clone, V> BPlusTreeMap<K, V> {
     /// Lean: `getTree_spec` (`Proofs/Read.lean`): `Some(v)` exactly when
     /// `(key, v)` is one of the tree's entries; `getH_sim`
     /// (`Proofs/HeapRead.lean`) for the same descent over node ids.
-    pub fn get(&self, key: &K) -> Option<&V> {
+    pub fn get<Q>(&self, key: &Q) -> Option<&V>
+    where
+        K: Borrow<Q>,
+        Q: Ord + ?Sized,
+    {
         let (parts, idx) = self.leaf_search(key)?;
         unsafe { Some(&*(parts.vals_ptr.add(idx) as *const V)) }
     }
 
-    pub fn get_mut(&mut self, key: &K) -> Option<&mut V> {
+    pub fn get_mut<Q>(&mut self, key: &Q) -> Option<&mut V>
+    where
+        K: Borrow<Q>,
+        Q: Ord + ?Sized,
+    {
         let (parts, idx) = self.leaf_search(key)?;
         unsafe { Some(&mut *(parts.vals_ptr.add(idx) as *mut V)) }
     }
 
-    pub fn get_item(&self, key: &K) -> Result<&V, BPlusTreeError> {
-        self.get(key).ok_or(BPlusTreeError::KeyNotFound)
-    }
-
-    pub fn contains_key(&self, key: &K) -> bool {
-        self.get(key).is_some()
-    }
-
-    pub fn get_or_default<'a>(&'a self, key: &K, default: &'a V) -> &'a V {
-        self.get(key).unwrap_or(default)
-    }
-
-    pub fn get_many<'a>(&'a self, keys: &'a [K]) -> BTreeResult<Vec<&'a V>> {
-        let mut out = Vec::with_capacity(keys.len());
-        for k in keys {
-            match self.get(k) {
-                Some(v) => out.push(v),
-                None => return Err(BPlusTreeError::KeyNotFound),
-            }
+    /// The stored key and its value. One descent: both come from the slot
+    /// the search landed on.
+    pub fn get_key_value<Q>(&self, key: &Q) -> Option<(&K, &V)>
+    where
+        K: Borrow<Q>,
+        Q: Ord + ?Sized,
+    {
+        let (parts, idx) = self.leaf_search(key)?;
+        unsafe {
+            Some((
+                &*(parts.keys_ptr.add(idx) as *const K),
+                &*(parts.vals_ptr.add(idx) as *const V),
+            ))
         }
-        Ok(out)
+    }
+
+    pub fn contains_key<Q>(&self, key: &Q) -> bool
+    where
+        K: Borrow<Q>,
+        Q: Ord + ?Sized,
+    {
+        self.leaf_search(key).is_some()
     }
 
     /// Lean: `leafSearch_some` and `leafSearch_none` (`Proofs/Read.lean`).
-    pub(crate) fn leaf_search(&self, key: &K) -> Option<(layout::LeafParts<K, V>, usize)> {
+    pub(crate) fn leaf_search<Q>(&self, key: &Q) -> Option<(layout::LeafParts<K, V>, usize)>
+    where
+        K: Borrow<Q>,
+        Q: Ord + ?Sized,
+    {
         let leaf = self.leaf_for_key(key)?;
         unsafe {
             let parts = layout::carve_leaf::<K, V>(leaf, &self.leaf_layout);

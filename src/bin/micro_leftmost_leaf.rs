@@ -10,7 +10,7 @@ fn main() {
 
     println!("Building tree with {} items (capacity {})...", n, cap);
     let build_start = Instant::now();
-    let mut map = BPlusTreeMap::new(cap).expect("new");
+    let mut map = BPlusTreeMap::with_capacity(cap);
     for i in 0..n {
         map.insert(i, i * 2);
     }
@@ -34,7 +34,7 @@ fn main() {
     let iterations = 100_000;
     let start = Instant::now();
     for _ in 0..iterations {
-        let iter = map.items();
+        let iter = map.iter();
         black_box(&iter);
         drop(iter);
     }
@@ -49,7 +49,7 @@ fn main() {
     let start = Instant::now();
     for _ in 0..iterations {
         let mut count = 0;
-        for (k, v) in map.items() {
+        for (k, v) in map.iter() {
             black_box((k, v));
             count += 1;
             if count >= 100 {
@@ -69,7 +69,7 @@ fn main() {
     let start = Instant::now();
     for _ in 0..iterations {
         let mut n = 0;
-        for (k, v) in map.items().take(100) {
+        for (k, v) in map.iter().take(100) {
             black_box((k, v));
             n += 1;
         }
@@ -106,7 +106,7 @@ fn main() {
     let start = Instant::now();
     for _ in 0..iterations {
         let mut n = 0;
-        for (k, v) in map.items().take(100) {
+        for (k, v) in map.iter().take(100) {
             black_box((k, v));
             n += 1;
         }
@@ -129,7 +129,7 @@ fn main() {
     println!("=== Test 5: Single iteration (replicating benchmark) ===");
     for trial in 1..=10 {
         let start = Instant::now();
-        let mut iter = map.items();
+        let mut iter = map.iter();
         let mut n = 0;
         for (k, v) in iter.by_ref().take(100) {
             black_box((k, v));

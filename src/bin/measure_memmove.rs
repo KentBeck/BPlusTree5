@@ -30,7 +30,7 @@ fn main() {
     println!("=== Part 1: Insert Operations ===\n");
 
     // Measure insert time
-    let mut tree = BPlusTreeMap::new(capacity).expect("new tree");
+    let mut tree = BPlusTreeMap::with_capacity(capacity);
     let start = Instant::now();
     for &key in &keys {
         black_box(tree.insert(key, key));
@@ -111,7 +111,7 @@ fn main() {
     println!("=== Part 3: Mixed Workload (Insert then Delete) ===\n");
 
     // Rebuild tree
-    let mut tree = BPlusTreeMap::new(capacity).expect("new tree");
+    let mut tree = BPlusTreeMap::with_capacity(capacity);
     for &key in &keys {
         tree.insert(key, key);
     }

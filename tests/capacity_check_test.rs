@@ -5,7 +5,7 @@ use bplustree::BPlusTreeMap;
 #[test]
 fn test_capacity_check_prevents_overflow() {
     // Create a tree with small capacity to trigger overflow scenarios
-    let mut tree: BPlusTreeMap<i32, String> = BPlusTreeMap::new(5).unwrap();
+    let mut tree: BPlusTreeMap<i32, String> = BPlusTreeMap::with_capacity(5);
 
     // Insert enough items to create a multi-level tree
     for i in 0..50 {
@@ -45,7 +45,7 @@ fn test_capacity_check_prevents_overflow() {
 #[test]
 fn test_simple_operations_still_work() {
     // Test that basic operations still work with our fixes
-    let mut tree: BPlusTreeMap<i32, String> = BPlusTreeMap::new(10).unwrap();
+    let mut tree: BPlusTreeMap<i32, String> = BPlusTreeMap::with_capacity(10);
 
     // Insert some items
     for i in 0..20 {
@@ -96,7 +96,7 @@ fn test_tree_with_drop_tracking() {
     let counter = Arc::new(AtomicUsize::new(0));
 
     {
-        let mut tree: BPlusTreeMap<i32, DropTracker> = BPlusTreeMap::new(5).unwrap();
+        let mut tree: BPlusTreeMap<i32, DropTracker> = BPlusTreeMap::with_capacity(5);
 
         // Insert items with drop tracking
         for i in 0..10 {

@@ -26,7 +26,7 @@ fn main() {
     // Build tree
     println!("Building tree...");
     let dataset = generate_dataset(tree_size);
-    let mut tree = BPlusTreeMap::new(capacity).expect("new tree");
+    let mut tree = BPlusTreeMap::with_capacity(capacity);
     for &(k, v) in &dataset {
         tree.insert(k, v);
     }

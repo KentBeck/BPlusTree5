@@ -6,7 +6,7 @@ fn test_borrow_from_left_leaf() {
     // We need to carefully construct the tree to force specific topology.
     // However, the library exposes `with_budgets` or `new(capacity)`.
     // Let's use `new(4)`.
-    let mut tree = BPlusTreeMap::new(4).unwrap();
+    let mut tree = BPlusTreeMap::with_capacity(4);
 
     // Fill to cause split.
     // 4 items -> full. 5th item -> split.
@@ -30,7 +30,7 @@ fn test_borrow_from_left_leaf() {
     // [1, 2, 3, 4] [5, 6, 7, 8]
     // Delete from Right.
 
-    let mut tree = BPlusTreeMap::new(4).unwrap();
+    let mut tree = BPlusTreeMap::with_capacity(4);
     for i in 1..=8 {
         tree.insert(i, i);
     }
@@ -47,7 +47,7 @@ fn test_borrow_from_left_leaf() {
 
 #[test]
 fn test_merge_leaves() {
-    let mut tree = BPlusTreeMap::new(4).unwrap();
+    let mut tree = BPlusTreeMap::with_capacity(4);
     for i in 1..=5 {
         tree.insert(i, i);
     }
@@ -65,7 +65,7 @@ fn test_merge_leaves() {
 
 #[test]
 fn test_root_collapse() {
-    let mut tree = BPlusTreeMap::new(4).unwrap();
+    let mut tree = BPlusTreeMap::with_capacity(4);
     // Grow height
     for i in 0..100 {
         tree.insert(i, i);
@@ -82,7 +82,7 @@ fn test_root_collapse() {
 #[test]
 fn test_capacity_edge_cases() {
     // Minimum capacity is 4.
-    let mut tree = BPlusTreeMap::new(4).unwrap();
+    let mut tree = BPlusTreeMap::with_capacity(4);
 
     // Insert/Delete in patterns
     for i in 0..20 {
@@ -103,7 +103,7 @@ fn test_capacity_edge_cases() {
 
 #[test]
 fn test_zst() {
-    let mut tree = BPlusTreeMap::new(4).unwrap();
+    let mut tree = BPlusTreeMap::with_capacity(4);
     for _ in 0..100 {
         tree.insert((), ());
     }

@@ -1,6 +1,5 @@
-use crate::{
-    free_branch_block, free_leaf_block, layout, BPlusTreeError, BPlusTreeMap, NodeHdr, NodeTag,
-};
+use crate::{free_branch_block, free_leaf_block, layout, BPlusTreeMap, NodeHdr, NodeTag};
+use core::borrow::Borrow;
 use core::ptr::{self, NonNull};
 
 /// How to refill an underfull child, chosen by `plan_rebalance`.
@@ -54,10 +53,25 @@ impl<K: Ord + Clone, V> BPlusTreeMap<K, V> {
     /// `Map.remove_wf` (`Proofs/Check.lean`) carries `entry_count` along.
     /// On the heap model, `removeH_sim` (`Proofs/HeapRemove.lean`): no fault,
     /// no double free, no leaked node, the sibling chain intact.
-    pub fn remove(&mut self, key: &K) -> Option<V> {
+    pub fn remove<Q>(&mut self, key: &Q) -> Option<V>
+    where
+        K: Borrow<Q>,
+        Q: Ord + ?Sized,
+    {
+        self.remove_entry(key).map(|(_, v)| v)
+    }
+
+    /// Remove the entry for `key`, returning the stored key alongside its
+    /// value. One descent: the key is read out of its slot rather than
+    /// looked up again.
+    pub fn remove_entry<Q>(&mut self, key: &Q) -> Option<(K, V)>
+    where
+        K: Borrow<Q>,
+        Q: Ord + ?Sized,
+    {
         let root = self.root?;
         let mut root_underflowed = false;
-        let value = unsafe { self.remove_rec(root, key, &mut root_underflowed) }?;
+        let entry = unsafe { self.remove_rec(root, key, &mut root_underflowed) }?;
 
         debug_assert!(self.entry_count > 0, "successful removal from an empty map");
         self.entry_count -= 1;
@@ -71,7 +85,7 @@ impl<K: Ord + Clone, V> BPlusTreeMap<K, V> {
             }
         }
 
-        Some(value)
+        Some(entry)
     }
 
     /// Shrink a root branch with at most two children: a lone child becomes
@@ -602,31 +616,39 @@ impl<K: Ord + Clone, V> BPlusTreeMap<K, V> {
     /// `removeRecH_sim` (`Proofs/HeapRemove.lean`) is the same recursion on
     /// the heap model: ids only shrink, freed ids are exactly the dropped
     /// ones, and nothing outside the subtree changes.
-    unsafe fn remove_rec(
+    unsafe fn remove_rec<Q>(
         &mut self,
         node: NonNull<u8>,
-        key: &K,
+        key: &Q,
         node_underflowed: &mut bool,
-    ) -> Option<V> {
+    ) -> Option<(K, V)>
+    where
+        K: Borrow<Q>,
+        Q: Ord + ?Sized,
+    {
         let hdr = &*(node.as_ptr() as *const NodeHdr);
         match hdr.tag {
             NodeTag::Leaf => {
-                let value = self.leaf_remove(node, key)?;
+                let entry = self.leaf_remove(node, key)?;
                 *node_underflowed = self.node_len(node) < self.min_leaf_len();
-                Some(value)
+                Some(entry)
             }
             NodeTag::Branch => {
                 let (child, idx) = self.child_for_key(node, key);
                 let mut child_underflowed = false;
-                let value = self.remove_rec(child, key, &mut child_underflowed)?;
+                let entry = self.remove_rec(child, key, &mut child_underflowed)?;
                 *node_underflowed = child_underflowed && self.fix_branch_child(node, idx);
-                Some(value)
+                Some(entry)
             }
         }
     }
 
     /// Lean: `leafRemove_spec` (`Proofs/Delete.lean`).
-    unsafe fn leaf_remove(&mut self, leaf: NonNull<u8>, key: &K) -> Option<V> {
+    unsafe fn leaf_remove<Q>(&mut self, leaf: NonNull<u8>, key: &Q) -> Option<(K, V)>
+    where
+        K: Borrow<Q>,
+        Q: Ord + ?Sized,
+    {
         let parts = layout::carve_leaf::<K, V>(leaf, &self.leaf_layout);
         let len = (*parts.hdr).len as usize;
         let keys = core::slice::from_raw_parts(parts.keys_ptr as *const K, len);
@@ -648,13 +670,6 @@ impl<K: Ord + Clone, V> BPlusTreeMap<K, V> {
 
         (*parts.hdr).len = (len - 1) as u16;
 
-        // Drop the removed key (value is returned to caller)
-        drop(removed_key);
-
-        Some(value)
-    }
-
-    pub fn remove_item(&mut self, key: &K) -> Result<V, BPlusTreeError> {
-        self.remove(key).ok_or(BPlusTreeError::KeyNotFound)
+        Some((removed_key, value))
     }
 }

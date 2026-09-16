@@ -1,7 +1,9 @@
 # Performance Tuning Plan
 
 Plan for closing the gaps between `BPlusTreeMap` and `std::collections::BTreeMap`.
-Scope decision: **only larger capacities matter** — all benchmarking and tuning
+Node capacities are not public API: `BPlusTreeMap::new` picks them from the
+sizes of `K` and `V`, and the `internal` feature exposes the constructors that
+set them so these benchmarks can sweep. Scope decision: **only larger capacities matter** — all benchmarking and tuning
 targets capacities ≥ 64 (benches standardize on 128). Small-capacity configs
 are used only by correctness tests, where they cheaply force split/merge/borrow
 edge cases.
@@ -10,9 +12,9 @@ Measurements from 2026-08-26 (Linux x86-64, rustc 1.94.1, release profile,
 1M `u64` keys unless noted). Reproduce with:
 
 ```
-cargo run --release --example perf_probe   # capacity sweep 64-512 + gap probes
-cargo run --release --bin bench_insert     # ins/get/del/mix/iter at cap=128
-cargo run --release --bin bench_range      # range scans at cap=128
+cargo run --release --features internal --example perf_probe  # capacity sweep
+cargo run --release --features internal --bin bench_insert    # ins/get/del/mix/iter
+cargo run --release --features internal --bin bench_range     # range scans
 ```
 
 ## Correctness gate (applies to every change below)
@@ -27,7 +29,7 @@ Every tuning change must pass, in order, before it lands:
 3. `cargo +nightly miri test --test differential_fuzz` and
    `cargo +nightly miri test --test drop_and_clear_tests -- --include-ignored`
    — undefined-behavior check on the raw-memory paths.
-4. `cargo run --release --example perf_probe` — confirm the intended win and
+4. `cargo run --release --features internal --example perf_probe` — confirm the win and
    no regression in the operations that already beat std (get, delete, mixed,
    iteration, sequential insert).
 

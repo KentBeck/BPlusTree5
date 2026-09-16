@@ -13,7 +13,7 @@ fn test_linked_list_corruption_during_merge() {
     insert_with_multiplier(&mut tree, 20, 10);
 
     // Capture the linked list structure before deletion
-    let _items_before: Vec<_> = tree.items().collect();
+    let _items_before: Vec<_> = tree.iter().collect();
 
     // Delete items to trigger merging
     for i in 5..15 {
@@ -21,7 +21,7 @@ fn test_linked_list_corruption_during_merge() {
     }
 
     // Verify linked list is still consistent
-    let items_after: Vec<_> = tree.items().collect();
+    let items_after: Vec<_> = tree.iter().collect();
 
     // Check that iteration gives us all remaining keys in order
     let mut expected_keys = Vec::new();
@@ -50,7 +50,7 @@ fn test_root_split_linked_list_race() {
     // The leaf linked list should be properly maintained
 
     // Verify by checking that iteration gives us all keys in order
-    let items: Vec<_> = tree.items().map(|(k, _)| *k).collect();
+    let items: Vec<_> = tree.iter().map(|(k, _)| *k).collect();
     let expected: Vec<_> = (0..5).collect();
 
     if items != expected {
@@ -58,7 +58,7 @@ fn test_root_split_linked_list_race() {
     }
 
     // Also check that iteration still works correctly after root split
-    let all_items: Vec<_> = tree.items().collect();
+    let all_items: Vec<_> = tree.iter().collect();
     if all_items.is_empty() {
         panic!("Root split linked list race: iteration returns no items");
     }
@@ -151,7 +151,7 @@ fn test_root_collapse_edge_cases() {
     assert_invariants(&tree, "root collapse cascade");
 
     // Also check that the remaining items are still accessible
-    let remaining_items: Vec<_> = tree.items().collect();
+    let remaining_items: Vec<_> = tree.iter().collect();
     if remaining_items.len() != 5 {
         panic!(
             "Root collapse cascade error: expected 5 items, got {}",

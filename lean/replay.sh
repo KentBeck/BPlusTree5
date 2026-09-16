@@ -10,7 +10,7 @@ cd "$(dirname "$0")/.."
 out=$(realpath -m "${1:-target/replay}")
 mkdir -p "$out"
 
-cargo build --release --example gen_trace
+cargo build --release --features internal --example gen_trace
 gen=$(realpath target/release/examples/gen_trace)
 
 # seed leaf_cap branch_cap ops key_space check_every query_every remove_pct drain

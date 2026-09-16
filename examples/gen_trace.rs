@@ -82,8 +82,8 @@ fn bound_str(b: &Bound<i64>) -> String {
 fn queries(tree: &BPlusTreeMap<i64, i64>, rng: &mut Rng, key_space: u64, w: &mut BufWriter<File>) {
     let q = rng.below(key_space) as i64;
     writeln!(w, "G {} {}", q, opt(tree.get(&q).copied())).unwrap();
-    writeln!(w, "F {}", pair(tree.first())).unwrap();
-    writeln!(w, "L {}", pair(tree.last())).unwrap();
+    writeln!(w, "F {}", pair(tree.first_key_value())).unwrap();
+    writeln!(w, "L {}", pair(tree.last_key_value())).unwrap();
 
     let start = random_bound(rng, key_space);
     let end = random_bound(rng, key_space);
@@ -131,7 +131,7 @@ fn main() {
     let shape_at: Option<usize> = args.get(10).map(|a| a.parse().expect("shape_at"));
 
     let mut rng = Rng(seed);
-    let mut tree = BPlusTreeMap::<i64, i64>::with_caps(leaf_cap, branch_cap).unwrap();
+    let mut tree = BPlusTreeMap::<i64, i64>::with_capacities(leaf_cap, branch_cap);
     let mut w = BufWriter::new(File::create(out).expect("create trace file"));
     writeln!(w, "CAPS {} {}", leaf_cap, branch_cap).unwrap();
 

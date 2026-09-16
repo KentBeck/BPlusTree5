@@ -24,7 +24,7 @@ impl Lcg {
 fn main() {
     let n_ops = 200_000_000;
     let max_key = 10_000_000;
-    let mut tree = BPlusTreeMap::new(128).unwrap();
+    let mut tree = BPlusTreeMap::with_capacity(128);
     let mut rng = Lcg::new(12345);
 
     println!("Running {} random operations...", n_ops);

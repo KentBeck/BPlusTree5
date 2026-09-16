@@ -5,7 +5,7 @@ use std::time::Instant;
 
 fn bench_bplustree_iterate(n: usize, cap: usize) -> (f64, f64, f64) {
     // Build the tree
-    let mut map = BPlusTreeMap::new(cap).expect("new");
+    let mut map = BPlusTreeMap::with_capacity(cap);
     let mut state: u64 = 0x123456789abcdef0;
 
     let build_start = Instant::now();
@@ -19,7 +19,7 @@ fn bench_bplustree_iterate(n: usize, cap: usize) -> (f64, f64, f64) {
     // Forward iteration
     let forward_start = Instant::now();
     let mut count = 0;
-    for (k, v) in map.items() {
+    for (k, v) in map.iter() {
         black_box(k);
         black_box(v);
         count += 1;
@@ -30,7 +30,7 @@ fn bench_bplustree_iterate(n: usize, cap: usize) -> (f64, f64, f64) {
     // Backward iteration
     let backward_start = Instant::now();
     let mut count = 0;
-    for (k, v) in map.items().rev() {
+    for (k, v) in map.iter().rev() {
         black_box(k);
         black_box(v);
         count += 1;

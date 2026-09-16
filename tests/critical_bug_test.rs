@@ -6,7 +6,7 @@ mod test_utils;
 
 #[test]
 fn test_linked_list_corruption_causes_data_loss() {
-    let mut tree: BPlusTreeMap<i32, String> = BPlusTreeMap::new(4).unwrap();
+    let mut tree: BPlusTreeMap<i32, String> = BPlusTreeMap::with_capacity(4);
 
     // Create a specific pattern to test merge operations
     // This scenario triggers merge_with_left_leaf operations
@@ -21,7 +21,7 @@ fn test_linked_list_corruption_causes_data_loss() {
     println!("Leaf count: {}", tree.leaf_count());
     println!(
         "Items: {:?}",
-        tree.items().map(|(k, _)| *k).collect::<Vec<_>>()
+        tree.iter().map(|(k, _)| *k).collect::<Vec<_>>()
     );
 
     // Now delete items in a pattern that will trigger merging
@@ -33,14 +33,14 @@ fn test_linked_list_corruption_causes_data_loss() {
     println!("After deletions:");
     println!(
         "Items: {:?}",
-        tree.items().map(|(k, _)| *k).collect::<Vec<_>>()
+        tree.iter().map(|(k, _)| *k).collect::<Vec<_>>()
     );
 
     // Verify linked list integrity during merge operations
 
     // Check if all remaining items are still accessible
     let expected_remaining = vec![10, 20, 30, 70, 80, 90, 100];
-    let actual_via_iteration: Vec<_> = tree.items().map(|(k, _)| *k).collect();
+    let actual_via_iteration: Vec<_> = tree.iter().map(|(k, _)| *k).collect();
 
     // Check each item individually via get()
     for &key in &expected_remaining {

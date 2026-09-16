@@ -20,7 +20,7 @@ fn main() {
     dataset.sort_by_key(|(k, _)| *k);
 
     // Build BPlusTreeMap
-    let mut map = BPlusTreeMap::new(cap).expect("new bplustree");
+    let mut map = BPlusTreeMap::with_capacity(cap);
     for &(k, v) in &dataset {
         map.insert(k, v);
     }
@@ -32,7 +32,7 @@ fn main() {
     // Warmup
     println!("Warming up...");
     for _ in 0..100 {
-        for (k, v) in map.items().take(iter_count) {
+        for (k, v) in map.iter().take(iter_count) {
             black_box((k, v));
         }
     }
@@ -63,7 +63,7 @@ fn main() {
         let mut count = 0;
         // This uses items() which calls leftmost_leaf() for initialization
         // This is the exact same code path as bench_partial_iter Scenario 1
-        for (k, v) in map.items().take(iter_count) {
+        for (k, v) in map.iter().take(iter_count) {
             black_box((k, v));
             count += 1;
         }

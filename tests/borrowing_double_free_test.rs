@@ -3,7 +3,7 @@ use bplustree::BPlusTreeMap;
 #[test]
 fn test_borrowing_operations_memory_safety() {
     // Test that borrowing operations don't cause double-free issues
-    let mut tree = BPlusTreeMap::new(4).unwrap();
+    let mut tree = BPlusTreeMap::with_capacity(4);
 
     // Insert enough items to create a multi-level tree that will require borrowing
     for i in 0..20 {
@@ -26,7 +26,7 @@ fn test_borrowing_operations_memory_safety() {
 
 #[test]
 fn test_leaf_borrowing_from_left() {
-    let mut tree = BPlusTreeMap::new(4).unwrap();
+    let mut tree = BPlusTreeMap::with_capacity(4);
 
     // Create a scenario that will trigger left leaf borrowing
     // Insert keys to create multiple leaves
@@ -52,7 +52,7 @@ fn test_leaf_borrowing_from_left() {
 
 #[test]
 fn test_leaf_borrowing_from_right() {
-    let mut tree = BPlusTreeMap::new(4).unwrap();
+    let mut tree = BPlusTreeMap::with_capacity(4);
 
     // Create a scenario that will trigger right leaf borrowing
     for i in 0..12 {
@@ -77,7 +77,7 @@ fn test_leaf_borrowing_from_right() {
 
 #[test]
 fn test_branch_borrowing_operations() {
-    let mut tree = BPlusTreeMap::new(4).unwrap();
+    let mut tree = BPlusTreeMap::with_capacity(4);
 
     // Create a deeper tree that will have branch borrowing
     for i in 0..50 {
@@ -103,7 +103,7 @@ fn test_branch_borrowing_operations() {
 
 #[test]
 fn test_mixed_operations_stress() {
-    let mut tree = BPlusTreeMap::new(6).unwrap();
+    let mut tree = BPlusTreeMap::with_capacity(6);
 
     // Stress test with mixed insert/remove operations
     for round in 0..5 {

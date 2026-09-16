@@ -7,7 +7,7 @@ fn main() {
     let cap = 128;
 
     // Build the tree
-    let mut map = BPlusTreeMap::new(cap).expect("new");
+    let mut map = BPlusTreeMap::with_capacity(cap);
     let mut state: u64 = 0x123456789abcdef0;
     let mut keys = Vec::with_capacity(n);
 

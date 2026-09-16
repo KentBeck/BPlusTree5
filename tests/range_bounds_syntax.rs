@@ -2,7 +2,7 @@ use bplustree::BPlusTreeMap;
 
 #[test]
 fn test_range_syntax_inclusive() {
-    let mut tree = BPlusTreeMap::new(16).unwrap();
+    let mut tree = BPlusTreeMap::with_capacity(16);
     for i in 0..10 {
         tree.insert(i, format!("value{}", i));
     }
@@ -23,7 +23,7 @@ fn test_range_syntax_inclusive() {
 
 #[test]
 fn test_range_syntax_exclusive() {
-    let mut tree = BPlusTreeMap::new(16).unwrap();
+    let mut tree = BPlusTreeMap::with_capacity(16);
     for i in 0..10 {
         tree.insert(i, format!("value{}", i));
     }
@@ -43,7 +43,7 @@ fn test_range_syntax_exclusive() {
 
 #[test]
 fn test_range_syntax_from() {
-    let mut tree = BPlusTreeMap::new(16).unwrap();
+    let mut tree = BPlusTreeMap::with_capacity(16);
     for i in 0..10 {
         tree.insert(i, format!("value{}", i));
     }
@@ -55,7 +55,7 @@ fn test_range_syntax_from() {
 
 #[test]
 fn test_range_syntax_to() {
-    let mut tree = BPlusTreeMap::new(16).unwrap();
+    let mut tree = BPlusTreeMap::with_capacity(16);
     for i in 0..10 {
         tree.insert(i, format!("value{}", i));
     }
@@ -67,7 +67,7 @@ fn test_range_syntax_to() {
 
 #[test]
 fn test_range_syntax_to_inclusive() {
-    let mut tree = BPlusTreeMap::new(16).unwrap();
+    let mut tree = BPlusTreeMap::with_capacity(16);
     for i in 0..10 {
         tree.insert(i, format!("value{}", i));
     }
@@ -79,7 +79,7 @@ fn test_range_syntax_to_inclusive() {
 
 #[test]
 fn test_range_syntax_full() {
-    let mut tree = BPlusTreeMap::new(16).unwrap();
+    let mut tree = BPlusTreeMap::with_capacity(16);
     for i in 0..10 {
         tree.insert(i, format!("value{}", i));
     }
@@ -91,12 +91,16 @@ fn test_range_syntax_full() {
 
 #[test]
 fn test_range_syntax_empty_ranges() {
-    let mut tree = BPlusTreeMap::new(16).unwrap();
+    let mut tree = BPlusTreeMap::with_capacity(16);
     for i in 0..10 {
         tree.insert(i, format!("value{}", i));
     }
 
     // Empty range - start > end
+    #[allow(
+        clippy::reversed_empty_ranges,
+        reason = "an inverted range is the case under test"
+    )]
     let range: Vec<_> = tree.range(7..3).collect();
     assert_eq!(range, vec![]);
 
@@ -111,7 +115,7 @@ fn test_range_syntax_empty_ranges() {
 
 #[test]
 fn test_range_syntax_edge_cases() {
-    let mut tree = BPlusTreeMap::new(16).unwrap();
+    let mut tree = BPlusTreeMap::with_capacity(16);
     for i in 0..10 {
         tree.insert(i * 2, format!("value{}", i * 2)); // Even numbers only
     }
@@ -131,7 +135,7 @@ fn test_range_syntax_edge_cases() {
 
 #[test]
 fn test_range_syntax_with_strings() {
-    let mut tree = BPlusTreeMap::new(16).unwrap();
+    let mut tree = BPlusTreeMap::with_capacity(16);
     let keys = vec!["apple", "banana", "cherry", "date", "elderberry", "fig"];
     for key in &keys {
         tree.insert(key.to_string(), format!("{}_value", key));
@@ -154,7 +158,7 @@ fn test_range_syntax_with_strings() {
 
 #[test]
 fn test_range_syntax_single_element() {
-    let mut tree = BPlusTreeMap::new(16).unwrap();
+    let mut tree = BPlusTreeMap::with_capacity(16);
     for i in 0..10 {
         tree.insert(i, format!("value{}", i));
     }
@@ -170,7 +174,7 @@ fn test_range_syntax_single_element() {
 
 #[test]
 fn test_range_syntax_excluded_start() {
-    let mut tree = BPlusTreeMap::new(16).unwrap();
+    let mut tree = BPlusTreeMap::with_capacity(16);
     for i in 0..10 {
         tree.insert(i, format!("value{}", i));
     }

@@ -34,7 +34,7 @@ fn demonstrate_min_keys_inconsistency() {
 fn demonstrate_range_iterator_excluded_bound_bug() {
     println!("\n=== DEMONSTRATING RANGE ITERATOR EXCLUDED BOUND BUG ===");
 
-    let mut tree: BPlusTreeMap<i32, String> = BPlusTreeMap::new(4).unwrap();
+    let mut tree: BPlusTreeMap<i32, String> = BPlusTreeMap::with_capacity(4);
 
     // Insert test data including some specific values
     for i in [1, 3, 5, 7, 9, 11, 13, 15] {
@@ -73,14 +73,14 @@ fn demonstrate_range_iterator_excluded_bound_bug() {
 fn demonstrate_linked_list_merge_corruption() {
     println!("\n=== DEMONSTRATING LINKED LIST CORRUPTION DURING MERGES ===");
 
-    let mut tree: BPlusTreeMap<i32, String> = BPlusTreeMap::new(4).unwrap();
+    let mut tree: BPlusTreeMap<i32, String> = BPlusTreeMap::with_capacity(4);
 
     // Create a scenario that will cause leaf merging
     // Insert keys that will create multiple leaves
     insert_with_multiplier(&mut tree, 30, 2);
 
     println!("Before deletions - items via iteration:");
-    let before: Vec<_> = tree.items().map(|(k, _)| *k).collect();
+    let before: Vec<_> = tree.iter().map(|(k, _)| *k).collect();
     println!("{:?}", before);
 
     // Delete items to trigger merging
@@ -89,7 +89,7 @@ fn demonstrate_linked_list_merge_corruption() {
     }
 
     println!("After deletions - items via iteration:");
-    let after: Vec<_> = tree.items().map(|(k, _)| *k).collect();
+    let after: Vec<_> = tree.iter().map(|(k, _)| *k).collect();
     println!("{:?}", after);
 
     // Check if iteration is consistent
@@ -117,7 +117,7 @@ fn demonstrate_linked_list_merge_corruption() {
 fn demonstrate_root_collapse_edge_case() {
     println!("\n=== DEMONSTRATING ROOT COLLAPSE EDGE CASES ===");
 
-    let mut tree: BPlusTreeMap<i32, String> = BPlusTreeMap::new(4).unwrap();
+    let mut tree: BPlusTreeMap<i32, String> = BPlusTreeMap::with_capacity(4);
 
     // Create a multi-level tree
     for i in 0..100 {
@@ -137,7 +137,7 @@ fn demonstrate_root_collapse_edge_case() {
     println!("  Is leaf root: {}", tree.is_leaf_root());
 
     // Check if the remaining items are still accessible
-    let remaining: Vec<_> = tree.items().map(|(k, _)| *k).collect();
+    let remaining: Vec<_> = tree.iter().map(|(k, _)| *k).collect();
     println!("  Remaining keys: {:?}", remaining);
 
     // Verify tree is still valid

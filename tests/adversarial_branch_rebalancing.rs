@@ -94,7 +94,7 @@ fn test_branch_borrow_from_underfull_sibling_attack() {
     }
 
     // Try to iterate to see if tree is corrupted
-    let items: Vec<_> = tree.items().collect();
+    let items: Vec<_> = tree.iter().collect();
     println!("Items after attack: {:?}", items.len());
 }
 
@@ -182,7 +182,7 @@ fn test_alternating_sibling_operations_attack() {
     }
 
     // Final verification - can we iterate correctly?
-    let items: Vec<_> = tree.items().map(|(k, _)| *k).collect();
+    let items: Vec<_> = tree.iter().map(|(k, _)| *k).collect();
     let mut sorted_items = items.clone();
     sorted_items.sort();
 

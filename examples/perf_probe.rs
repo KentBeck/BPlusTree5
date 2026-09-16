@@ -19,7 +19,7 @@ fn main() {
     println!("== insert {} random u64 keys ==", n);
     for cap in [64usize, 128, 256, 512] {
         let t0 = Instant::now();
-        let mut m = BPlusTreeMap::new(cap).unwrap();
+        let mut m = BPlusTreeMap::with_capacity(cap);
         for &k in &keys {
             m.insert(k, k);
         }
@@ -34,7 +34,7 @@ fn main() {
     }
     {
         let t0 = Instant::now();
-        let mut m = BPlusTreeMap::recommended().unwrap();
+        let mut m = BPlusTreeMap::new();
         let leaf_cap = m.leaf_layout().cap;
         let branch_cap = m.branch_layout().cap;
         for &k in &keys {
@@ -63,7 +63,7 @@ fn main() {
     println!("== sequential insert (sorted keys) ==");
     for cap in [128usize, 256] {
         let t0 = Instant::now();
-        let mut m = BPlusTreeMap::new(cap).unwrap();
+        let mut m = BPlusTreeMap::with_capacity(cap);
         for i in 0..n as u64 {
             m.insert(i, i);
         }
@@ -89,7 +89,7 @@ fn main() {
     );
 
     // Build cap=128 tree of sorted keys for query probes.
-    let mut m = BPlusTreeMap::new(128).unwrap();
+    let mut m = BPlusTreeMap::with_capacity(128);
     for i in 0..n as u64 {
         m.insert(i, i);
     }
@@ -143,8 +143,8 @@ fn main() {
     let t0 = Instant::now();
     let mut sum = 0u64;
     for _ in 0..10_000 {
-        sum = sum.wrapping_add(*black_box(m.first().unwrap().0));
-        sum = sum.wrapping_add(*black_box(m.last().unwrap().0));
+        sum = sum.wrapping_add(*black_box(m.first_key_value().unwrap().0));
+        sum = sum.wrapping_add(*black_box(m.last_key_value().unwrap().0));
     }
     let dt = t0.elapsed().as_secs_f64();
     println!("  bplustree     {:.4}s (sum {})", dt, sum);

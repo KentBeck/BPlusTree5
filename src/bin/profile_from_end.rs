@@ -11,7 +11,7 @@ fn main() {
 
     println!("Building tree with {} items (capacity {})...", n, cap);
     let build_start = Instant::now();
-    let mut map = BPlusTreeMap::new(cap).expect("new");
+    let mut map = BPlusTreeMap::with_capacity(cap);
     for i in 0..n {
         map.insert(i, i * 2);
     }
@@ -34,7 +34,7 @@ fn main() {
     // Test 1: Measure just getting the count
     println!("=== Test 1: Measuring iter().count() ===");
     let start = Instant::now();
-    let total = map.items().count();
+    let total = map.iter().count();
     let count_time = start.elapsed();
     println!("Total items: {}", total);
     println!("Time to count: {:?}", count_time);
@@ -47,7 +47,7 @@ fn main() {
 
     let start = Instant::now();
     let mut n = 0;
-    for (k, v) in map.items().skip(skip_amount).take(iter_count) {
+    for (k, v) in map.iter().skip(skip_amount).take(iter_count) {
         black_box((k, v));
         n += 1;
     }
@@ -62,9 +62,9 @@ fn main() {
 
     let start = Instant::now();
     for _ in 0..iterations {
-        let total = map.items().count();
+        let total = map.iter().count();
         let mut n = 0;
-        for (k, v) in map.items().skip(total.saturating_sub(iter_count)) {
+        for (k, v) in map.iter().skip(total.saturating_sub(iter_count)) {
             black_box((k, v));
             n += 1;
         }
@@ -87,7 +87,7 @@ fn main() {
 
     let start = Instant::now();
     for _ in 0..100 {
-        let mut iter = map.items();
+        let mut iter = map.iter();
         for _ in 0..skip_amount {
             iter.next();
         }

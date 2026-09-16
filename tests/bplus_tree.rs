@@ -1,4 +1,4 @@
-use bplustree::{BPlusTreeError, BPlusTreeMap};
+use bplustree::BPlusTreeMap;
 
 mod test_utils;
 use test_utils::*;
@@ -88,7 +88,7 @@ fn test_get_with_default() {
     assert_eq!(tree.get(&1), Some(&"one".to_string()));
     assert_eq!(tree.get(&2), None);
     assert_eq!(
-        tree.get_or_default(&2, &"default".to_string()),
+        tree.get(&2).unwrap_or(&"default".to_string()),
         &"default".to_string()
     );
     assert_invariants(&tree, "get with default");
@@ -298,7 +298,7 @@ fn test_remove_from_tree_with_branch_root() {
 
 #[test]
 fn test_remove_multiple_from_tree_with_branches() {
-    let mut tree = BPlusTreeMap::new(4).unwrap();
+    let mut tree = BPlusTreeMap::with_capacity(4);
 
     // Insert more items to ensure we have multiple levels
     for i in 1..=9 {
@@ -338,7 +338,7 @@ fn test_remove_multiple_from_tree_with_branches() {
 /*
 #[test]
 fn test_keys_iterator() {
-    let mut tree = BPlusTreeMap::new(4).unwrap();
+    let mut tree = BPlusTreeMap::with_capacity(4);
     tree.insert(1, "one".to_string());
     tree.insert(2, "two".to_string());
     tree.insert(3, "three".to_string());
@@ -349,7 +349,7 @@ fn test_keys_iterator() {
 
 #[test]
 fn test_values_iterator() {
-    let mut tree = BPlusTreeMap::new(4).unwrap();
+    let mut tree = BPlusTreeMap::with_capacity(4);
     tree.insert(1, "one".to_string());
     tree.insert(2, "two".to_string());
     tree.insert(3, "three".to_string());
@@ -360,7 +360,7 @@ fn test_values_iterator() {
 
 #[test]
 fn test_items_iterator() {
-    let mut tree = BPlusTreeMap::new(4).unwrap();
+    let mut tree = BPlusTreeMap::with_capacity(4);
     tree.insert(1, "one".to_string());
     tree.insert(2, "two".to_string());
     tree.insert(3, "three".to_string());
@@ -375,12 +375,12 @@ fn test_items_iterator() {
 
 #[test]
 fn test_range_iterator() {
-    let mut tree = BPlusTreeMap::new(4).unwrap();
+    let mut tree = BPlusTreeMap::with_capacity(4);
     for i in 1..=10 {
         tree.insert(i, format!("value_{}", i));
     }
 
-    let range_items: Vec<_> = tree.items_range(Some(&3), Some(&8)).collect();
+    let range_items: Vec<_> = tree.range(3..8).collect();
     assert_eq!(range_items, vec![
         (&3, &"value_3".to_string()),
         (&4, &"value_4".to_string()),
@@ -403,7 +403,7 @@ fn test_range_iterator() {
 
 #[test]
 fn test_insert_through_branch_node() {
-    let mut tree = BPlusTreeMap::new(4).unwrap();
+    let mut tree = BPlusTreeMap::with_capacity(4);
 
     // First, create a tree with a branch root by inserting enough items
     // to cause a leaf split and root promotion
@@ -456,7 +456,7 @@ fn test_insert_through_branch_node() {
 
 #[test]
 fn test_leaf_split_updates_parent_branch() {
-    let mut tree = BPlusTreeMap::new(4).unwrap();
+    let mut tree = BPlusTreeMap::with_capacity(4);
 
     // First, create a tree with a branch root by inserting enough items
     // to cause a leaf split and root promotion
@@ -501,7 +501,7 @@ fn test_leaf_split_updates_parent_branch() {
     assert_eq!(tree.len(), 9, "Tree should have 9 items");
 
     // Verify that the range query works correctly across the split
-    let range: Vec<_> = tree.items_range(Some(&1), Some(&10)).collect();
+    let range: Vec<_> = tree.range(1..10).collect();
     assert_eq!(range.len(), 9, "Range query should return all 9 items");
 
     // Verify items are in sorted order
@@ -521,7 +521,7 @@ fn test_leaf_split_updates_parent_branch() {
 
 #[test]
 fn test_root_promotion_leaf_to_branch() {
-    let mut tree = BPlusTreeMap::new(4).unwrap();
+    let mut tree = BPlusTreeMap::with_capacity(4);
 
     // Initially, the tree should have a leaf root
     assert!(
@@ -600,7 +600,7 @@ fn test_root_promotion_leaf_to_branch() {
     assert_eq!(new_value, None, "Should be able to insert new key");
 
     // Verify range queries work across the promoted structure
-    let range: Vec<_> = tree.items_range(Some(&1), Some(&7)).collect();
+    let range: Vec<_> = tree.range(1..7).collect();
     assert_eq!(range.len(), 6, "Range query should return all 6 items");
 
     // Verify items are in sorted order
@@ -618,7 +618,7 @@ fn test_root_promotion_leaf_to_branch() {
 
 #[test]
 fn test_branch_node_split_creates_new_level() {
-    let mut tree = BPlusTreeMap::new(4).unwrap();
+    let mut tree = BPlusTreeMap::with_capacity(4);
 
     // Insert enough items to create a multi-level tree structure
     // This should eventually cause branch node splits
@@ -670,7 +670,7 @@ fn test_branch_node_split_creates_new_level() {
     assert_eq!(tree.len(), 25, "Tree should have 25 items");
 
     // Verify range queries work correctly across the complex structure
-    let range: Vec<_> = tree.items_range(Some(&1), Some(&26)).collect();
+    let range: Vec<_> = tree.range(1..26).collect();
     assert_eq!(range.len(), 25, "Range query should return all 25 items");
 
     // Verify items are in sorted order
@@ -715,7 +715,7 @@ fn test_comprehensive_insert_scenarios() {
             capacity
         );
 
-        let mut tree = BPlusTreeMap::new(capacity).unwrap();
+        let mut tree = BPlusTreeMap::with_capacity(capacity);
 
         // Test 1: Sequential insertion (ascending order)
         for i in 1..=50 {
@@ -740,7 +740,7 @@ fn test_comprehensive_insert_scenarios() {
         }
 
         // Test 2: Reverse insertion (descending order)
-        let mut tree2 = BPlusTreeMap::new(capacity).unwrap();
+        let mut tree2 = BPlusTreeMap::with_capacity(capacity);
         for i in (1..=50).rev() {
             tree2.insert(i, format!("rev_value_{}", i));
             assert!(
@@ -763,7 +763,7 @@ fn test_comprehensive_insert_scenarios() {
         }
 
         // Test 3: Random-ish insertion (deterministic pattern)
-        let mut tree3 = BPlusTreeMap::new(capacity).unwrap();
+        let mut tree3 = BPlusTreeMap::with_capacity(capacity);
         let mut keys: Vec<i32> = (1..=50).collect();
         // Simple deterministic shuffle for reproducibility
         for i in 0..keys.len() {
@@ -816,9 +816,9 @@ fn test_comprehensive_insert_scenarios() {
         assert_eq!(tree3.len(), 50, "Random tree should have 50 items");
 
         // Test range queries on all trees
-        let range1: Vec<_> = tree.items_range(Some(&10), Some(&20)).collect();
-        let range2: Vec<_> = tree2.items_range(Some(&10), Some(&20)).collect();
-        let range3: Vec<_> = tree3.items_range(Some(&10), Some(&20)).collect();
+        let range1: Vec<_> = tree.range(10..20).collect();
+        let range2: Vec<_> = tree2.range(10..20).collect();
+        let range3: Vec<_> = tree3.range(10..20).collect();
 
         assert_eq!(
             range1.len(),
@@ -861,13 +861,13 @@ fn test_comprehensive_insert_scenarios() {
 // ============================================================================
 
 #[test]
-fn test_invalid_capacity_error() {
-    // Test that creating a tree with capacity < 4 should return error
-    let result = BPlusTreeMap::<i32, String>::new(3);
-    assert!(result.is_err());
+fn test_invalid_capacity_panics() {
+    // Four is the smallest capacity a node can split and merge at.
+    let too_small = std::panic::catch_unwind(|| BPlusTreeMap::<i32, String>::with_capacity(3));
+    assert!(too_small.is_err());
 
     // Test that capacity 4 works
-    let _tree = BPlusTreeMap::<i32, String>::new(4).unwrap();
+    let _tree = BPlusTreeMap::<i32, String>::with_capacity(4);
 }
 
 // ============================================================================
@@ -879,28 +879,25 @@ fn test_invalid_capacity_error() {
 // ============================================================================
 
 #[test]
-fn test_key_error_on_missing_key() {
-    let mut tree = BPlusTreeMap::new(4).unwrap();
+fn test_get_reports_a_missing_key() {
+    let mut tree = BPlusTreeMap::with_capacity(4);
     tree.insert(1, "one".to_string());
 
-    // Test that get_item returns error for missing keys
-    let result = tree.get_item(&2);
-    assert_eq!(result, Err(BPlusTreeError::KeyNotFound));
-
-    // Existing key should work
-    let result = tree.get_item(&1);
-    assert_eq!(result, Ok(&"one".to_string()));
+    assert_eq!(tree.get(&2), None);
+    assert_eq!(tree.get(&1), Some(&"one".to_string()));
+    assert_eq!(tree.get_key_value(&1), Some((&1, &"one".to_string())));
+    assert_eq!(tree.get_key_value(&2), None);
 }
 
 #[test]
 fn test_remove_nonexistent_key_raises_error() {
-    let mut tree = BPlusTreeMap::new(4).unwrap();
+    let mut tree = BPlusTreeMap::with_capacity(4);
     tree.insert(1, "one".to_string());
     tree.insert(2, "two".to_string());
 
     // Try to remove non-existent key
-    let result = tree.remove_item(&3);
-    assert_eq!(result, Err(BPlusTreeError::KeyNotFound));
+    assert_eq!(tree.remove(&3), None);
+    assert_eq!(tree.remove_entry(&3), None);
 
     // Tree should be unchanged
     assert_eq!(tree.len(), 2);
@@ -914,29 +911,29 @@ fn test_remove_nonexistent_key_raises_error() {
 
 #[test]
 fn test_iterate_empty_tree() {
-    let tree = BPlusTreeMap::<i32, String>::new(4).unwrap();
-    let items: Vec<_> = tree.items().collect();
+    let tree = BPlusTreeMap::<i32, String>::with_capacity(4);
+    let items: Vec<_> = tree.iter().collect();
     assert_eq!(items, vec![]);
 }
 
 #[test]
 fn test_iterate_single_item() {
-    let mut tree = BPlusTreeMap::new(4).unwrap();
+    let mut tree = BPlusTreeMap::with_capacity(4);
     tree.insert(5, "value5".to_string());
 
-    let items: Vec<_> = tree.items().collect();
+    let items: Vec<_> = tree.iter().collect();
     assert_eq!(items, vec![(&5, &"value5".to_string())]);
 }
 
 #[test]
 fn test_iterate_multiple_items_single_leaf() {
-    let mut tree = BPlusTreeMap::new(4).unwrap();
+    let mut tree = BPlusTreeMap::with_capacity(4);
     tree.insert(1, "value1".to_string());
     tree.insert(3, "value3".to_string());
     tree.insert(2, "value2".to_string());
     tree.insert(4, "value4".to_string());
 
-    let items: Vec<_> = tree.items().collect();
+    let items: Vec<_> = tree.iter().collect();
     assert_eq!(
         items,
         vec![
@@ -950,13 +947,13 @@ fn test_iterate_multiple_items_single_leaf() {
 
 #[test]
 fn test_iterate_multiple_leaves() {
-    let mut tree = BPlusTreeMap::new(4).unwrap();
+    let mut tree = BPlusTreeMap::with_capacity(4);
     // Insert enough to create multiple leaves
     for i in 1..=9 {
         tree.insert(i, format!("value{}", i));
     }
 
-    let items: Vec<_> = tree.items().collect();
+    let items: Vec<_> = tree.iter().collect();
     // Check that we have the right number of items and they're in order
     assert_eq!(items.len(), 9);
     for (i, (key, value)) in items.iter().enumerate() {
@@ -969,7 +966,7 @@ fn test_iterate_multiple_leaves() {
 
 #[test]
 fn test_keys_iterator() {
-    let mut tree = BPlusTreeMap::new(4).unwrap();
+    let mut tree = BPlusTreeMap::with_capacity(4);
     tree.insert(1, "one".to_string());
     tree.insert(2, "two".to_string());
     tree.insert(3, "three".to_string());
@@ -980,7 +977,7 @@ fn test_keys_iterator() {
 
 #[test]
 fn test_values_iterator() {
-    let mut tree = BPlusTreeMap::new(4).unwrap();
+    let mut tree = BPlusTreeMap::with_capacity(4);
     tree.insert(1, "one".to_string());
     tree.insert(2, "two".to_string());
     tree.insert(3, "three".to_string());
@@ -998,12 +995,12 @@ fn test_values_iterator() {
 
 #[test]
 fn test_iterate_from_key() {
-    let mut tree = BPlusTreeMap::new(4).unwrap();
+    let mut tree = BPlusTreeMap::with_capacity(4);
     for i in 0..10 {
         tree.insert(i, format!("value{}", i));
     }
 
-    let items: Vec<_> = tree.items_range(Some(&5), None).collect();
+    let items: Vec<_> = tree.range(5..).collect();
     assert_eq!(items.len(), 5); // keys 5, 6, 7, 8, 9
     for (i, (key, value)) in items.iter().enumerate() {
         let expected_key = i + 5;
@@ -1015,12 +1012,12 @@ fn test_iterate_from_key() {
 
 #[test]
 fn test_iterate_until_key() {
-    let mut tree = BPlusTreeMap::new(4).unwrap();
+    let mut tree = BPlusTreeMap::with_capacity(4);
     for i in 0..10 {
         tree.insert(i, format!("value{}", i));
     }
 
-    let items: Vec<_> = tree.items_range(None, Some(&5)).collect();
+    let items: Vec<_> = tree.range(..5).collect();
     assert_eq!(items.len(), 5); // keys 0, 1, 2, 3, 4
     for (i, (key, value)) in items.iter().enumerate() {
         let expected_key = i;
@@ -1032,12 +1029,12 @@ fn test_iterate_until_key() {
 
 #[test]
 fn test_iterate_range() {
-    let mut tree = BPlusTreeMap::new(4).unwrap();
+    let mut tree = BPlusTreeMap::with_capacity(4);
     for i in 0..20 {
         tree.insert(i, format!("value{}", i));
     }
 
-    let items: Vec<_> = tree.items_range(Some(&5), Some(&15)).collect();
+    let items: Vec<_> = tree.range(5..15).collect();
     assert_eq!(items.len(), 10); // keys 5, 6, 7, 8, 9, 10, 11, 12, 13, 14
     for (i, (key, value)) in items.iter().enumerate() {
         let expected_key = i + 5;
@@ -1049,13 +1046,13 @@ fn test_iterate_range() {
 
 #[test]
 fn test_iterate_from_nonexistent_key() {
-    let mut tree = BPlusTreeMap::new(4).unwrap();
+    let mut tree = BPlusTreeMap::with_capacity(4);
     for i in [1, 3, 5, 7, 9] {
         tree.insert(i, format!("value{}", i));
     }
 
     // Start from 4 (doesn't exist, should start from 5)
-    let items: Vec<_> = tree.items_range(Some(&4), None).collect();
+    let items: Vec<_> = tree.range(4..).collect();
     assert_eq!(items.len(), 3); // keys 5, 7, 9
     assert_eq!(*items[0].0, 5);
     assert_eq!(*items[1].0, 7);
@@ -1064,13 +1061,13 @@ fn test_iterate_from_nonexistent_key() {
 
 #[test]
 fn test_iterate_empty_range() {
-    let mut tree = BPlusTreeMap::new(4).unwrap();
+    let mut tree = BPlusTreeMap::with_capacity(4);
     for i in 0..10 {
         tree.insert(i, format!("value{}", i));
     }
 
     // Start after end (invalid range)
-    let items: Vec<_> = tree.items_range(Some(&7), Some(&3)).collect();
+    let items: Vec<_> = tree.range(7..3).collect();
     assert_eq!(items, vec![]);
 }
 
@@ -1080,20 +1077,20 @@ fn test_iterate_empty_range() {
 
 #[test]
 fn test_invariants_empty_tree() {
-    let tree = BPlusTreeMap::<i32, String>::new(4).unwrap();
+    let tree = BPlusTreeMap::<i32, String>::with_capacity(4);
     assert!(tree.check_invariants());
 }
 
 #[test]
 fn test_invariants_single_item() {
-    let mut tree = BPlusTreeMap::new(4).unwrap();
+    let mut tree = BPlusTreeMap::with_capacity(4);
     tree.insert(1, "one".to_string());
     assert!(tree.check_invariants());
 }
 
 #[test]
 fn test_invariants_after_split() {
-    let mut tree = BPlusTreeMap::new(4).unwrap();
+    let mut tree = BPlusTreeMap::with_capacity(4);
     // Insert enough items to force a split
     for i in 1..=5 {
         tree.insert(i, format!("value{}", i));
@@ -1107,7 +1104,7 @@ fn test_invariants_after_split() {
 
 #[test]
 fn test_invariants_after_many_operations() {
-    let mut tree = BPlusTreeMap::new(4).unwrap();
+    let mut tree = BPlusTreeMap::with_capacity(4);
 
     // Insert many items
     for i in 0..20 {
@@ -1146,7 +1143,7 @@ fn test_invariants_after_many_operations() {
 
 #[test]
 fn test_large_capacity_edge_cases() {
-    let mut tree = BPlusTreeMap::new(64).unwrap(); // Large capacity
+    let mut tree = BPlusTreeMap::with_capacity(64); // Large capacity
 
     // Fill up close to capacity
     for i in 0..60 {
@@ -1177,7 +1174,7 @@ fn test_large_capacity_edge_cases() {
 #[test]
 fn test_capacity_boundary_conditions() {
     for capacity in [4, 8, 16, 32] {
-        let mut tree = BPlusTreeMap::new(capacity).unwrap();
+        let mut tree = BPlusTreeMap::with_capacity(capacity);
 
         // Fill exactly to capacity
         for i in 0..capacity {
@@ -1210,7 +1207,7 @@ fn test_capacity_boundary_conditions() {
 #[test]
 fn test_sequential_vs_random_patterns() {
     // Test sequential insertion
-    let mut tree = BPlusTreeMap::new(8).unwrap();
+    let mut tree = BPlusTreeMap::with_capacity(8);
     for i in 0..50 {
         tree.insert(i, format!("value_{}", i));
         assert!(
@@ -1221,7 +1218,7 @@ fn test_sequential_vs_random_patterns() {
     }
 
     // Test reverse insertion
-    let mut tree = BPlusTreeMap::new(8).unwrap();
+    let mut tree = BPlusTreeMap::with_capacity(8);
     for i in (0..50).rev() {
         tree.insert(i, format!("value_{}", i));
         assert!(
@@ -1232,7 +1229,7 @@ fn test_sequential_vs_random_patterns() {
     }
 
     // Test random-ish insertion (using a deterministic pattern)
-    let mut tree = BPlusTreeMap::new(8).unwrap();
+    let mut tree = BPlusTreeMap::with_capacity(8);
     let mut keys: Vec<i32> = (0..50).collect();
     // Simple deterministic shuffle
     for i in 0..keys.len() {
@@ -1256,7 +1253,7 @@ fn test_sequential_vs_random_patterns() {
 
 #[test]
 fn test_deep_tree_insertion() {
-    let mut tree = BPlusTreeMap::new(4).unwrap(); // Small capacity to force deep tree
+    let mut tree = BPlusTreeMap::with_capacity(4); // Small capacity to force deep tree
 
     // Insert enough items to create a deep tree (3+ levels)
     for i in 0..100 {
@@ -1280,7 +1277,7 @@ fn test_deep_tree_insertion() {
 
 #[test]
 fn test_branch_node_splitting() {
-    let mut tree = BPlusTreeMap::new(4).unwrap();
+    let mut tree = BPlusTreeMap::with_capacity(4);
 
     // Insert items in a pattern that will force branch node splits
     for i in 0..50 {
@@ -1304,7 +1301,7 @@ fn test_branch_node_splitting() {
 
 #[test]
 fn test_multi_level_splits() {
-    let mut tree = BPlusTreeMap::new(5).unwrap(); // Slightly larger capacity
+    let mut tree = BPlusTreeMap::with_capacity(5); // Slightly larger capacity
 
     // Insert enough items to force multiple levels of splits
     for i in 0..200 {
@@ -1331,7 +1328,7 @@ fn test_multi_level_splits() {
 
 #[test]
 fn test_large_sequential_insertion() {
-    let mut tree = BPlusTreeMap::new(8).unwrap();
+    let mut tree = BPlusTreeMap::with_capacity(8);
 
     // Insert a large number of sequential items
     for i in 0..1000 {
@@ -1358,7 +1355,7 @@ fn test_large_sequential_insertion() {
 
 #[test]
 fn test_reverse_order_insertion() {
-    let mut tree = BPlusTreeMap::new(6).unwrap();
+    let mut tree = BPlusTreeMap::with_capacity(6);
 
     // Insert items in reverse order to test different split patterns
     for i in (0..100).rev() {
@@ -1388,7 +1385,7 @@ fn test_reverse_order_insertion() {
 
 #[test]
 fn test_delete_until_empty() {
-    let mut tree = BPlusTreeMap::new(4).unwrap();
+    let mut tree = BPlusTreeMap::with_capacity(4);
 
     // Insert items
     for i in 0..20 {
@@ -1420,7 +1417,7 @@ fn test_delete_until_empty() {
 
 #[test]
 fn test_root_collapse() {
-    let mut tree = BPlusTreeMap::new(4).unwrap();
+    let mut tree = BPlusTreeMap::with_capacity(4);
 
     // Create a tree with branch root
     for i in 0..10 {
@@ -1446,7 +1443,7 @@ fn test_root_collapse() {
 
 #[test]
 fn test_alternating_insert_delete() {
-    let mut tree = BPlusTreeMap::new(6).unwrap();
+    let mut tree = BPlusTreeMap::with_capacity(6);
 
     // Alternating pattern of insert and delete
     for i in 0..50 {
@@ -1467,7 +1464,7 @@ fn test_alternating_insert_delete() {
 
 #[test]
 fn test_delete_from_deep_tree() {
-    let mut tree = BPlusTreeMap::new(4).unwrap();
+    let mut tree = BPlusTreeMap::with_capacity(4);
 
     // Create a deep tree
     for i in 0..100 {
@@ -1500,7 +1497,7 @@ fn test_delete_from_deep_tree() {
 
 #[test]
 fn test_delete_all_but_one() {
-    let mut tree = BPlusTreeMap::new(5).unwrap();
+    let mut tree = BPlusTreeMap::with_capacity(5);
 
     // Insert many items
     for i in 0..50 {
@@ -1530,7 +1527,7 @@ fn test_delete_all_but_one() {
 
 #[test]
 fn test_massive_insertion_deletion_cycle() {
-    let mut tree = BPlusTreeMap::new(8).unwrap();
+    let mut tree = BPlusTreeMap::with_capacity(8);
 
     // Insert a large number of items
     for i in 0..500 {
@@ -1571,7 +1568,7 @@ fn test_massive_insertion_deletion_cycle() {
 
 #[test]
 fn test_random_deletion_pattern() {
-    let mut tree = BPlusTreeMap::new(6).unwrap();
+    let mut tree = BPlusTreeMap::with_capacity(6);
 
     // Insert items
     for i in 0..100 {
@@ -1604,7 +1601,7 @@ fn test_random_deletion_pattern() {
 
 #[test]
 fn test_delete_from_minimal_tree() {
-    let mut tree = BPlusTreeMap::new(4).unwrap(); // Minimal capacity
+    let mut tree = BPlusTreeMap::with_capacity(4); // Minimal capacity
 
     // Create a tree with just enough items to have a branch root
     for i in 1..=5 {
@@ -1629,7 +1626,7 @@ fn test_delete_from_minimal_tree() {
 
 #[test]
 fn test_stress_deletion_with_invariants() {
-    let mut tree = BPlusTreeMap::new(5).unwrap();
+    let mut tree = BPlusTreeMap::with_capacity(5);
 
     // Build a moderately complex tree
     for i in 0..200 {
@@ -1658,7 +1655,7 @@ fn test_stress_deletion_with_invariants() {
 
 #[test]
 fn test_single_key_operations() {
-    let mut tree = BPlusTreeMap::new(4).unwrap();
+    let mut tree = BPlusTreeMap::with_capacity(4);
 
     // Test with single key
     tree.insert(42, "answer".to_string());
@@ -1682,7 +1679,7 @@ fn test_single_key_operations() {
 
 #[test]
 fn test_duplicate_key_handling() {
-    let mut tree = BPlusTreeMap::new(6).unwrap();
+    let mut tree = BPlusTreeMap::with_capacity(6);
 
     // Insert same key multiple times
     assert_eq!(tree.insert(1, "first".to_string()), None);
@@ -1703,7 +1700,7 @@ fn test_duplicate_key_handling() {
 #[test]
 fn test_extreme_capacity_values() {
     // Test minimum capacity
-    let mut tree = BPlusTreeMap::new(4).unwrap();
+    let mut tree = BPlusTreeMap::with_capacity(4);
     for i in 0..20 {
         tree.insert(i, i * 2);
         assert!(
@@ -1714,7 +1711,7 @@ fn test_extreme_capacity_values() {
     }
 
     // Test larger capacity
-    let mut tree = BPlusTreeMap::new(100).unwrap();
+    let mut tree = BPlusTreeMap::with_capacity(100);
     for i in 0..200 {
         tree.insert(i, i * 3);
         if i % 25 == 0 {
@@ -1729,7 +1726,7 @@ fn test_extreme_capacity_values() {
 
 #[test]
 fn test_pathological_deletion_patterns() {
-    let mut tree = BPlusTreeMap::new(5).unwrap();
+    let mut tree = BPlusTreeMap::with_capacity(5);
 
     // Insert items
     for i in 0..50 {
@@ -1760,7 +1757,7 @@ fn test_pathological_deletion_patterns() {
 
 #[test]
 fn test_clustered_key_patterns() {
-    let mut tree = BPlusTreeMap::new(6).unwrap();
+    let mut tree = BPlusTreeMap::with_capacity(6);
 
     // Insert clustered keys (0-9, 100-109, 200-209, etc.)
     for cluster in 0..10 {
@@ -1793,7 +1790,7 @@ fn test_clustered_key_patterns() {
 
 #[test]
 fn test_interleaved_operations() {
-    let mut tree = BPlusTreeMap::new(7).unwrap();
+    let mut tree = BPlusTreeMap::with_capacity(7);
 
     // Interleave insertions, deletions, and updates
     for i in 0..100 {
@@ -1821,7 +1818,7 @@ fn test_interleaved_operations() {
 
 #[test]
 fn test_clear_and_reuse() {
-    let mut tree = BPlusTreeMap::new(5).unwrap();
+    let mut tree = BPlusTreeMap::with_capacity(5);
 
     // Populate the tree
     for i in 0..50 {
@@ -1846,31 +1843,31 @@ fn test_clear_and_reuse() {
 
 #[test]
 fn test_range_query_edge_cases() {
-    let mut tree = BPlusTreeMap::new(4).unwrap();
+    let mut tree = BPlusTreeMap::with_capacity(4);
     for i in 0..20 {
         tree.insert(i, format!("value{}", i));
     }
 
     // Range that covers the entire tree
-    let all_items: Vec<_> = tree.items_range(None, None).collect();
+    let all_items: Vec<_> = tree.iter().collect();
     assert_eq!(all_items.len(), 20);
 
     // Range that starts before the first key
-    let from_neg: Vec<_> = tree.items_range(Some(&-5), Some(&5)).collect();
+    let from_neg: Vec<_> = tree.range(-5..5).collect();
     assert_eq!(from_neg.len(), 5); // 0, 1, 2, 3, 4
 
     // Range that ends after the last key
-    let to_far: Vec<_> = tree.items_range(Some(&15), Some(&100)).collect();
+    let to_far: Vec<_> = tree.range(15..100).collect();
     assert_eq!(to_far.len(), 5); // 15, 16, 17, 18, 19
 
     // Range with no items
-    let no_items: Vec<_> = tree.items_range(Some(&25), Some(&30)).collect();
+    let no_items: Vec<_> = tree.range(25..30).collect();
     assert_eq!(no_items.len(), 0);
 }
 
 #[test]
 fn test_range_syntax_support() {
-    let mut tree = BPlusTreeMap::new(16).unwrap();
+    let mut tree = BPlusTreeMap::with_capacity(16);
     for i in 0..10 {
         tree.insert(i, format!("value{}", i));
     }
@@ -1911,7 +1908,7 @@ fn test_range_syntax_support() {
 
 #[test]
 fn test_range_syntax_with_excluded_bounds() {
-    let mut tree = BPlusTreeMap::new(16).unwrap();
+    let mut tree = BPlusTreeMap::with_capacity(16);
     for i in 0..10 {
         tree.insert(i, format!("value{}", i));
     }
@@ -1940,23 +1937,23 @@ fn test_range_syntax_with_excluded_bounds() {
 
 #[test]
 fn test_first_and_last() {
-    let mut tree = BPlusTreeMap::new(4).unwrap();
-    assert_eq!(tree.first(), None);
-    assert_eq!(tree.last(), None);
+    let mut tree = BPlusTreeMap::with_capacity(4);
+    assert_eq!(tree.first_key_value(), None);
+    assert_eq!(tree.last_key_value(), None);
 
     tree.insert(10, "ten".to_string());
-    assert_eq!(tree.first(), Some((&10, &"ten".to_string())));
-    assert_eq!(tree.last(), Some((&10, &"ten".to_string())));
+    assert_eq!(tree.first_key_value(), Some((&10, &"ten".to_string())));
+    assert_eq!(tree.last_key_value(), Some((&10, &"ten".to_string())));
 
     tree.insert(5, "five".to_string());
     tree.insert(15, "fifteen".to_string());
-    assert_eq!(tree.first(), Some((&5, &"five".to_string())));
-    assert_eq!(tree.last(), Some((&15, &"fifteen".to_string())));
+    assert_eq!(tree.first_key_value(), Some((&5, &"five".to_string())));
+    assert_eq!(tree.last_key_value(), Some((&15, &"fifteen".to_string())));
 }
 
 #[test]
 fn test_get_mut() {
-    let mut tree = BPlusTreeMap::new(4).unwrap();
+    let mut tree = BPlusTreeMap::with_capacity(4);
     tree.insert(1, "one".to_string());
     tree.insert(2, "two".to_string());
 
@@ -1974,7 +1971,7 @@ fn test_get_mut() {
 
 #[test]
 fn test_leaf_linked_list_completeness() {
-    let mut tree = BPlusTreeMap::new(5).unwrap();
+    let mut tree = BPlusTreeMap::with_capacity(5);
 
     // Insert items
     for i in 0..100 {
@@ -1990,66 +1987,57 @@ fn test_leaf_linked_list_completeness() {
 }
 
 #[test]
-fn test_try_insert_and_remove() {
-    let mut tree = BPlusTreeMap::new(4).unwrap();
+fn test_insert_and_remove_report_the_old_entry() {
+    let mut tree = BPlusTreeMap::with_capacity(4);
 
-    // Successful insert
-    assert!(tree.try_insert(1, "one".to_string()).is_ok());
+    // A new key has no previous value.
+    assert_eq!(tree.insert(1, "one".to_string()), None);
     assert_eq!(tree.get(&1), Some(&"one".to_string()));
 
-    // Successful remove
-    assert!(tree.try_remove(&1).is_ok());
-    assert_eq!(tree.get(&1), None);
+    // Inserting over a key hands back what was there.
+    assert_eq!(tree.insert(1, "uno".to_string()), Some("one".to_string()));
 
-    // Failed remove
-    assert!(tree.try_remove(&1).is_err());
+    // Removing hands back the value, then reports the key is gone.
+    assert_eq!(tree.remove(&1), Some("uno".to_string()));
+    assert_eq!(tree.get(&1), None);
+    assert_eq!(tree.remove(&1), None);
 }
 
 #[test]
-fn test_batch_insert() {
-    let mut tree = BPlusTreeMap::new(4).unwrap();
+fn test_extend_inserts_many() {
+    let mut tree = BPlusTreeMap::with_capacity(4);
 
-    // Successful batch insert
     let items = vec![(1, "one"), (2, "two"), (3, "three")];
-    let result = tree.batch_insert(items.iter().map(|(k, v)| (*k, v.to_string())).collect());
-    assert!(result.is_ok());
+    tree.extend(items.iter().map(|(k, v)| (*k, v.to_string())));
     assert_eq!(tree.len(), 3);
 
-    // Batch insert with duplicates
+    // Extending over an existing key overwrites it.
     let items2 = vec![(4, "four"), (2, "TWO"), (5, "five")];
-    let result2 = tree.batch_insert(items2.iter().map(|(k, v)| (*k, v.to_string())).collect());
-    assert!(result2.is_ok());
+    tree.extend(items2.iter().map(|(k, v)| (*k, v.to_string())));
     assert_eq!(tree.len(), 5);
     assert_eq!(tree.get(&2), Some(&"TWO".to_string()));
 }
 
 #[test]
-fn test_get_many() {
-    let mut tree = BPlusTreeMap::new(4).unwrap();
+fn test_lookups_over_several_keys() {
+    let mut tree = BPlusTreeMap::with_capacity(4);
     tree.insert(1, "one".to_string());
     tree.insert(2, "two".to_string());
     tree.insert(3, "three".to_string());
 
-    // Successful get_many
-    let keys = vec![1, 3];
-    let result = tree.get_many(&keys);
-    assert!(result.is_ok());
-    assert_eq!(
-        result.unwrap(),
-        vec![&"one".to_string(), &"three".to_string()]
-    );
+    let found: Option<Vec<&String>> = [1, 3].iter().map(|k| tree.get(k)).collect();
+    assert_eq!(found, Some(vec![&"one".to_string(), &"three".to_string()]));
 
-    // get_many with missing key
-    let keys2 = vec![1, 4, 2];
-    let result2 = tree.get_many(&keys2);
-    assert!(result2.is_err());
+    // One missing key makes the whole lookup fail.
+    let missing: Option<Vec<&String>> = [1, 4, 2].iter().map(|k| tree.get(k)).collect();
+    assert_eq!(missing, None);
 }
 
 #[test]
-fn test_validate_for_operation() {
-    let mut tree = BPlusTreeMap::new(4).unwrap();
-    assert!(tree.validate_for_operation("initial").is_ok());
+fn test_invariants_hold_from_empty() {
+    let mut tree = BPlusTreeMap::with_capacity(4);
+    assert!(tree.check_invariants_detailed().is_ok());
 
     tree.insert(1, "one".to_string());
-    assert!(tree.validate_for_operation("after insert").is_ok());
+    assert!(tree.check_invariants_detailed().is_ok());
 }

@@ -19,7 +19,7 @@ fn test_intensive_linked_list_corruption_detection() {
         tree.insert(key, format!("value_{}", key));
     }
 
-    let initial_items: Vec<_> = tree.items().map(|(k, _)| *k).collect();
+    let initial_items: Vec<_> = tree.iter().map(|(k, _)| *k).collect();
     println!("Initial tree items: {:?}", initial_items);
     println!("Initial leaf count: {}", tree.leaf_count());
 
@@ -33,7 +33,7 @@ fn test_intensive_linked_list_corruption_detection() {
         tree.remove(&key);
 
         // Verify linked list consistency after each removal
-        let items_after_removal: Vec<_> = tree.items().map(|(k, _)| *k).collect();
+        let items_after_removal: Vec<_> = tree.iter().map(|(k, _)| *k).collect();
         println!("  Items after removal: {:?}", items_after_removal);
 
         // Verify all remaining items are accessible via get()
@@ -72,7 +72,7 @@ fn test_intensive_linked_list_corruption_detection() {
         }
     }
 
-    let remaining_after_phase2: Vec<_> = tree.items().map(|(k, _)| *k).collect();
+    let remaining_after_phase2: Vec<_> = tree.iter().map(|(k, _)| *k).collect();
     let expected_after_phase2 = vec![0, 10, 80, 90];
 
     if remaining_after_phase2 != expected_after_phase2 {
@@ -92,7 +92,7 @@ fn test_intensive_linked_list_corruption_detection() {
         tree.insert(i * 5, format!("rebuild_{}", i * 5));
     }
 
-    let before_alternating: Vec<_> = tree.items().map(|(k, _)| *k).collect();
+    let before_alternating: Vec<_> = tree.iter().map(|(k, _)| *k).collect();
     println!("Before alternating deletions: {:?}", before_alternating);
 
     // Remove every other element to stress the linked list
@@ -107,7 +107,7 @@ fn test_intensive_linked_list_corruption_detection() {
         tree.remove(&key);
     }
 
-    let after_alternating: Vec<_> = tree.items().map(|(k, _)| *k).collect();
+    let after_alternating: Vec<_> = tree.iter().map(|(k, _)| *k).collect();
     println!("After alternating deletions: {:?}", after_alternating);
 
     // Verify alternating pattern worked correctly
@@ -144,13 +144,13 @@ fn test_merge_scenarios_linked_list_integrity() {
         // Then merge B into A, should result in: [A+B] -> [C] -> [D]
         insert_sequential_range(&mut tree, 16);
 
-        let before_merge: Vec<_> = tree.items().map(|(k, _)| *k).collect();
+        let before_merge: Vec<_> = tree.iter().map(|(k, _)| *k).collect();
         println!("Before deletions: {:?}", before_merge);
 
         // Delete elements to force left merge
         deletion_range_attack(&mut tree, 4, 8);
 
-        let after_merge: Vec<_> = tree.items().map(|(k, _)| *k).collect();
+        let after_merge: Vec<_> = tree.iter().map(|(k, _)| *k).collect();
         println!("After deletions: {:?}", after_merge);
 
         // Verify no gaps in sequence
@@ -172,13 +172,13 @@ fn test_merge_scenarios_linked_list_integrity() {
 
         insert_sequential_range(&mut tree, 16);
 
-        let before_merge: Vec<_> = tree.items().map(|(k, _)| *k).collect();
+        let before_merge: Vec<_> = tree.iter().map(|(k, _)| *k).collect();
         println!("Before deletions: {:?}", before_merge);
 
         // Delete elements to force right merge
         deletion_range_attack(&mut tree, 8, 12);
 
-        let after_merge: Vec<_> = tree.items().map(|(k, _)| *k).collect();
+        let after_merge: Vec<_> = tree.iter().map(|(k, _)| *k).collect();
         println!("After deletions: {:?}", after_merge);
 
         // Verify no gaps in sequence
@@ -198,13 +198,13 @@ fn test_merge_scenarios_linked_list_integrity() {
         println!("\n--- Test 3: Cascading merges ---");
         let mut tree = create_tree_4_with_data(32);
 
-        let before_cascade: Vec<_> = tree.items().map(|(k, _)| *k).collect();
+        let before_cascade: Vec<_> = tree.iter().map(|(k, _)| *k).collect();
         println!("Before cascading deletions: {:?}", before_cascade);
 
         // Delete large ranges to force cascading merges
         deletion_range_attack(&mut tree, 8, 24);
 
-        let after_cascade: Vec<_> = tree.items().map(|(k, _)| *k).collect();
+        let after_cascade: Vec<_> = tree.iter().map(|(k, _)| *k).collect();
         println!("After cascading deletions: {:?}", after_cascade);
 
         // Verify no gaps in sequence
@@ -232,11 +232,11 @@ fn test_linked_list_edge_cases() {
         let mut tree = create_tree_4();
         tree.insert(1, "single".to_string());
 
-        let items: Vec<_> = tree.items().map(|(k, _)| *k).collect();
+        let items: Vec<_> = tree.iter().map(|(k, _)| *k).collect();
         assert_eq!(items, vec![1], "Single leaf case failed");
 
         tree.remove(&1);
-        let items_after: Vec<_> = tree.items().map(|(k, _)| *k).collect();
+        let items_after: Vec<_> = tree.iter().map(|(k, _)| *k).collect();
         assert!(items_after.is_empty(), "Single leaf removal failed");
 
         println!("✅ Single leaf operations passed");
@@ -252,7 +252,7 @@ fn test_linked_list_edge_cases() {
         // Remove elements from first leaf
         deletion_range_attack(&mut tree, 0, 3);
 
-        let remaining: Vec<_> = tree.items().map(|(k, _)| *k).collect();
+        let remaining: Vec<_> = tree.iter().map(|(k, _)| *k).collect();
         let expected: Vec<_> = (3..8).collect();
         assert_eq!(remaining, expected, "Two leaf partial removal failed");
 
@@ -264,7 +264,7 @@ fn test_linked_list_edge_cases() {
         let mut tree = create_tree_4_with_data(10);
         deletion_range_attack(&mut tree, 0, 10);
 
-        let final_items: Vec<_> = tree.items().map(|(k, _)| *k).collect();
+        let final_items: Vec<_> = tree.iter().map(|(k, _)| *k).collect();
         assert!(
             final_items.is_empty(),
             "Tree should be empty after removing all items"
@@ -300,7 +300,7 @@ fn test_linked_list_stress_consistency() {
         }
 
         // Verify linked list consistency
-        let items: Vec<_> = tree.items().map(|(k, _)| *k).collect();
+        let items: Vec<_> = tree.iter().map(|(k, _)| *k).collect();
 
         // Check that items are in sorted order (linked list integrity)
         for window in items.windows(2) {

@@ -37,7 +37,7 @@ fn main() {
 
     // Build initial tree
     println!("Building initial tree...");
-    let mut tree = BPlusTreeMap::new(capacity).expect("new tree");
+    let mut tree = BPlusTreeMap::with_capacity(capacity);
     for &key in &keys {
         tree.insert(key, key);
     }
@@ -169,7 +169,7 @@ fn profile_insert(keys: &[u64], capacity: usize) {
     let test_count = 100_000;
 
     println!("Test 1: Sequential inserts (empty tree)");
-    let mut tree = BPlusTreeMap::new(capacity).expect("new tree");
+    let mut tree = BPlusTreeMap::with_capacity(capacity);
     let start = Instant::now();
     for i in 0..test_count {
         tree.insert(keys[i], keys[i]);
@@ -183,7 +183,7 @@ fn profile_insert(keys: &[u64], capacity: usize) {
     println!();
 
     println!("Test 2: Random inserts (empty tree)");
-    let mut tree = BPlusTreeMap::new(capacity).expect("new tree");
+    let mut tree = BPlusTreeMap::with_capacity(capacity);
     let mut shuffled = keys[..test_count].to_vec();
     let mut state: u64 = 0x9E3779B97F4A7C15;
     for i in 0..shuffled.len() {
@@ -217,7 +217,7 @@ fn profile_insert(keys: &[u64], capacity: usize) {
     println!();
 
     println!("Test 4: Inserts causing splits (large tree)");
-    let mut tree = BPlusTreeMap::new(capacity).expect("new tree");
+    let mut tree = BPlusTreeMap::with_capacity(capacity);
     for i in 0..500_000 {
         tree.insert(keys[i], keys[i]);
     }
@@ -243,7 +243,7 @@ fn profile_delete(keys: &[u64], capacity: usize) {
     let test_count = 100_000;
 
     println!("Test 1: Sequential deletes (front of dataset)");
-    let mut tree = BPlusTreeMap::new(capacity).expect("new tree");
+    let mut tree = BPlusTreeMap::with_capacity(capacity);
     for &key in keys {
         tree.insert(key, key);
     }
@@ -260,7 +260,7 @@ fn profile_delete(keys: &[u64], capacity: usize) {
     println!();
 
     println!("Test 2: Random deletes");
-    let mut tree = BPlusTreeMap::new(capacity).expect("new tree");
+    let mut tree = BPlusTreeMap::with_capacity(capacity);
     for &key in keys {
         tree.insert(key, key);
     }
@@ -280,7 +280,7 @@ fn profile_delete(keys: &[u64], capacity: usize) {
     println!();
 
     println!("Test 3: Delete from middle of nodes");
-    let mut tree = BPlusTreeMap::new(capacity).expect("new tree");
+    let mut tree = BPlusTreeMap::with_capacity(capacity);
     for &key in keys {
         tree.insert(key, key);
     }
@@ -298,7 +298,7 @@ fn profile_delete(keys: &[u64], capacity: usize) {
     println!();
 
     println!("Test 4: Delete causing merges (sparse tree)");
-    let mut tree = BPlusTreeMap::new(capacity).expect("new tree");
+    let mut tree = BPlusTreeMap::with_capacity(capacity);
     for i in 0..test_count * 2 {
         tree.insert(keys[i], keys[i]);
     }

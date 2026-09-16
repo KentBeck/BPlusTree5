@@ -32,7 +32,7 @@ mod profile {
 
         let insertion_order = generate_keys(item_count);
         let deletion_order = shuffled(&insertion_order);
-        let mut map = BPlusTreeMap::with_caps(leaf_cap, branch_cap).expect("valid capacities");
+        let mut map = BPlusTreeMap::with_capacities(leaf_cap, branch_cap);
         for (value, &key) in insertion_order.iter().enumerate() {
             black_box(map.insert(key, value));
         }

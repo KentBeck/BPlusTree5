@@ -1,5 +1,6 @@
 use alloc::format;
 use alloc::string::String;
+use core::borrow::Borrow;
 use core::ptr::NonNull;
 
 use crate::layout;
@@ -80,12 +81,12 @@ impl<K, V> BPlusTreeMap<K, V> {
     /// Centralized binary search for keys in a node.
     /// This function will be optimized for performance in future iterations.
     #[inline(always)]
-    pub(crate) fn binary_search_keys<T: Ord>(
-        &self,
-        keys: &[T],
-        target: &T,
-    ) -> Result<usize, usize> {
-        keys.binary_search(target)
+    pub(crate) fn binary_search_keys<T, Q>(&self, keys: &[T], target: &Q) -> Result<usize, usize>
+    where
+        T: Borrow<Q>,
+        Q: Ord + ?Sized,
+    {
+        keys.binary_search_by(|k| k.borrow().cmp(target))
     }
 
     /// Bulk-move `count` key/value pairs from one node's arrays to another's.
@@ -239,11 +240,15 @@ impl<K: Ord, V> BPlusTreeMap<K, V> {
     /// meets a missing node (`insertRecH_sim`, `removeRecH_sim`,
     /// `leafForKeyH_sim`).
     #[inline(always)]
-    pub(crate) unsafe fn child_for_key(
+    pub(crate) unsafe fn child_for_key<Q>(
         &self,
         branch: NonNull<u8>,
-        key: &K,
-    ) -> (NonNull<u8>, usize) {
+        key: &Q,
+    ) -> (NonNull<u8>, usize)
+    where
+        K: Borrow<Q>,
+        Q: Ord + ?Sized,
+    {
         let parts = layout::carve_branch::<K>(branch, &self.branch_layout);
         let len = (*parts.hdr).len as usize;
         let keys = core::slice::from_raw_parts(parts.keys_ptr as *const K, len);
@@ -262,7 +267,11 @@ impl<K: Ord, V> BPlusTreeMap<K, V> {
     /// Lean: `leafForKeyH_sim` (`Proofs/HeapRead.lean`): the leaf reached
     /// splits the sibling chain where `leafForKey` splits the entries.
     #[inline(always)]
-    pub(crate) fn leaf_for_key(&self, key: &K) -> Option<NonNull<u8>> {
+    pub(crate) fn leaf_for_key<Q>(&self, key: &Q) -> Option<NonNull<u8>>
+    where
+        K: Borrow<Q>,
+        Q: Ord + ?Sized,
+    {
         let mut cur = self.root?;
         unsafe {
             loop {
@@ -323,6 +332,8 @@ impl<K: Ord + Clone, V> BPlusTreeMap<K, V> {
         }
     }
 
+    #[cfg(any(test, feature = "internal"))]
+    #[doc(hidden)]
     pub fn is_leaf_root(&self) -> bool {
         match self.root {
             None => true,
@@ -330,6 +341,8 @@ impl<K: Ord + Clone, V> BPlusTreeMap<K, V> {
         }
     }
 
+    #[cfg(any(test, feature = "internal"))]
+    #[doc(hidden)]
     pub fn leaf_count(&self) -> usize {
         let mut count = 0usize;
         let mut cur = match self.leftmost_leaf() {
@@ -350,6 +363,8 @@ impl<K: Ord + Clone, V> BPlusTreeMap<K, V> {
         count
     }
 
+    #[cfg(any(test, feature = "internal"))]
+    #[doc(hidden)]
     pub fn check_invariants(&self) -> bool {
         self.check_invariants_detailed().is_ok()
     }
@@ -362,6 +377,8 @@ impl<K: Ord + Clone, V> BPlusTreeMap<K, V> {
     /// `lean/BPlusTree/Model/Check.lean` mirrors it arm for arm (minus the
     /// pointer checks) and `checkInvariants_iff` proves it accepts exactly
     /// the trees the model's `WF` describes.
+    #[cfg(any(test, feature = "internal"))]
+    #[doc(hidden)]
     pub fn check_invariants_detailed(&self) -> Result<(), String> {
         let mut state = ValidationState {
             total_items: 0,
@@ -611,7 +628,7 @@ mod tests {
 
     #[test]
     fn validation_rejects_a_stale_entry_count() {
-        let mut tree = BPlusTreeMap::new(4).unwrap();
+        let mut tree = BPlusTreeMap::with_capacity(4);
         tree.insert(1, 10);
 
         tree.entry_count += 1;
@@ -627,9 +644,10 @@ mod tests {
     /// can reject it.
     #[test]
     fn validation_rejects_leaves_at_different_depths() {
-        use crate::{alloc_leaf_block, free_leaf_block, layout, NodeHdr, NodeTag};
+        use crate::node_alloc::{alloc_leaf_block, free_leaf_block};
+        use crate::{layout, NodeHdr, NodeTag};
 
-        let mut tree = BPlusTreeMap::<i64, i64>::with_caps(4, 4).unwrap();
+        let mut tree = BPlusTreeMap::<i64, i64>::with_capacities(4, 4);
         for k in 0..64 {
             tree.insert(k, k);
         }
@@ -693,10 +711,10 @@ mod tests {
 /// computes the same function over the same rendering, so equal digests
 /// mean equal shapes (up to a 2^-64 accidental collision); neither side
 /// is adversarial, so a cryptographic hash would buy nothing here.
-#[cfg(feature = "compat_test_api")]
+#[cfg(any(test, feature = "internal"))]
 pub struct ShapeHasher(u64);
 
-#[cfg(feature = "compat_test_api")]
+#[cfg(any(test, feature = "internal"))]
 impl ShapeHasher {
     pub const OFFSET: u64 = 0xcbf2_9ce4_8422_2325;
     pub const PRIME: u64 = 0x0000_0100_0000_01b3;
@@ -710,14 +728,14 @@ impl ShapeHasher {
     }
 }
 
-#[cfg(feature = "compat_test_api")]
+#[cfg(any(test, feature = "internal"))]
 impl Default for ShapeHasher {
     fn default() -> Self {
         Self::new()
     }
 }
 
-#[cfg(feature = "compat_test_api")]
+#[cfg(any(test, feature = "internal"))]
 impl core::fmt::Write for ShapeHasher {
     fn write_str(&mut self, s: &str) -> core::fmt::Result {
         for b in s.bytes() {
@@ -728,7 +746,7 @@ impl core::fmt::Write for ShapeHasher {
     }
 }
 
-#[cfg(feature = "compat_test_api")]
+#[cfg(any(test, feature = "internal"))]
 impl<K: Ord + Clone + core::fmt::Debug, V: core::fmt::Debug> BPlusTreeMap<K, V> {
     /// Render the tree's shape for the Lean replay harness (`lean/Replay`).
     /// A leaf is `(k:v k:v ...)`; a branch is `[child sep child sep child]`

@@ -2,7 +2,7 @@ use bplustree::BPlusTreeMap;
 
 #[test]
 fn len_tracks_cardinality_across_mutations() {
-    let mut tree = BPlusTreeMap::new(4).unwrap();
+    let mut tree = BPlusTreeMap::with_capacity(4);
 
     assert_eq!(tree.len(), 0);
     assert!(tree.is_empty());

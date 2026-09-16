@@ -5,7 +5,7 @@ use bplustree::{BPlusTreeMap, DeleteProfile};
 #[test]
 fn delete_profile_counts_repairs_and_can_be_reset() {
     const ITEM_COUNT: usize = 1_000;
-    let mut tree = BPlusTreeMap::new(4).unwrap();
+    let mut tree = BPlusTreeMap::with_capacity(4);
     for key in 0..ITEM_COUNT {
         tree.insert(key, key);
     }

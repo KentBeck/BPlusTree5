@@ -2,19 +2,28 @@
 name = "bplustree"
 version = "0.1.0"
 edition = "2021"
-description = "Raw-memory B+ tree map with fixed-size nodes"
+description = "A B+ tree map with the API of std::collections::BTreeMap"
 license = "MIT"
 
 [lib]
 path = "src/lib.rs"
 
 [dependencies]
-# old_bplustree = { package = "bplustree", path = "vendor/BPlusTree3/rust" }
+serde = { version = "1", optional = true, default-features = false, features = ["alloc"] }
+
+[dev-dependencies]
+# Enables the `internal` feature for the test suite only: integration tests
+# drive the tree at small node capacities and assert on its invariants, and
+# neither knob is part of the public API. A plain `cargo build` compiles the
+# library without them.
+bplustree = { path = ".", features = ["internal"] }
+serde_json = "1"
 
 [features]
-default = ["compat_test_api"]
-# Enables test-only compatibility APIs used by the imported test suites.
-compat_test_api = []
+default = []
+# Node capacities, invariant checks and shape dumps for this repository's own
+# tests and benchmarks. Not public API; see src/internal.rs.
+internal = []
 # Adds per-map counters for diagnosing deletion repair work. Normal builds
 # contain neither the counters nor the instrumentation updates.
 delete_profile = []
@@ -22,5 +31,262 @@ delete_profile = []
 [profile.release]
 debug = true
 
-[workspace]
-members = ["compat"]
+[[bin]]
+name = "asm_test"
+path = "src/bin/asm_test.rs"
+# Benchmarks and profiling tools: they set node capacities and read node
+# internals, so they build only with the `internal` feature.
+required-features = ["internal"]
+
+[[bin]]
+name = "bench_delete"
+path = "src/bin/bench_delete.rs"
+# Benchmarks and profiling tools: they set node capacities and read node
+# internals, so they build only with the `internal` feature.
+required-features = ["internal"]
+
+[[bin]]
+name = "bench_get"
+path = "src/bin/bench_get.rs"
+# Benchmarks and profiling tools: they set node capacities and read node
+# internals, so they build only with the `internal` feature.
+required-features = ["internal"]
+
+[[bin]]
+name = "bench_insert"
+path = "src/bin/bench_insert.rs"
+# Benchmarks and profiling tools: they set node capacities and read node
+# internals, so they build only with the `internal` feature.
+required-features = ["internal"]
+
+[[bin]]
+name = "bench_iterate"
+path = "src/bin/bench_iterate.rs"
+# Benchmarks and profiling tools: they set node capacities and read node
+# internals, so they build only with the `internal` feature.
+required-features = ["internal"]
+
+[[bin]]
+name = "bench_partial_iter"
+path = "src/bin/bench_partial_iter.rs"
+# Benchmarks and profiling tools: they set node capacities and read node
+# internals, so they build only with the `internal` feature.
+required-features = ["internal"]
+
+[[bin]]
+name = "bench_range"
+path = "src/bin/bench_range.rs"
+# Benchmarks and profiling tools: they set node capacities and read node
+# internals, so they build only with the `internal` feature.
+required-features = ["internal"]
+
+[[bin]]
+name = "measure_memmove"
+path = "src/bin/measure_memmove.rs"
+# Benchmarks and profiling tools: they set node capacities and read node
+# internals, so they build only with the `internal` feature.
+required-features = ["internal"]
+
+[[bin]]
+name = "micro_leftmost_leaf"
+path = "src/bin/micro_leftmost_leaf.rs"
+# Benchmarks and profiling tools: they set node capacities and read node
+# internals, so they build only with the `internal` feature.
+required-features = ["internal"]
+
+[[bin]]
+name = "microbench_iter"
+path = "src/bin/microbench_iter.rs"
+# Benchmarks and profiling tools: they set node capacities and read node
+# internals, so they build only with the `internal` feature.
+required-features = ["internal"]
+
+[[bin]]
+name = "profile_all_operations"
+path = "src/bin/profile_all_operations.rs"
+# Benchmarks and profiling tools: they set node capacities and read node
+# internals, so they build only with the `internal` feature.
+required-features = ["internal"]
+
+[[bin]]
+name = "profile_delete"
+path = "src/bin/profile_delete.rs"
+# Benchmarks and profiling tools: they set node capacities and read node
+# internals, so they build only with the `internal` feature.
+required-features = ["internal"]
+
+[[bin]]
+name = "profile_delete_detailed"
+path = "src/bin/profile_delete_detailed.rs"
+# Benchmarks and profiling tools: they set node capacities and read node
+# internals, so they build only with the `internal` feature.
+required-features = ["internal"]
+
+[[bin]]
+name = "profile_delete_small"
+path = "src/bin/profile_delete_small.rs"
+# Benchmarks and profiling tools: they set node capacities and read node
+# internals, so they build only with the `internal` feature.
+required-features = ["internal"]
+
+[[bin]]
+name = "profile_delete_std"
+path = "src/bin/profile_delete_std.rs"
+# Benchmarks and profiling tools: they set node capacities and read node
+# internals, so they build only with the `internal` feature.
+required-features = ["internal"]
+
+[[bin]]
+name = "profile_from_beginning"
+path = "src/bin/profile_from_beginning.rs"
+# Benchmarks and profiling tools: they set node capacities and read node
+# internals, so they build only with the `internal` feature.
+required-features = ["internal"]
+
+[[bin]]
+name = "profile_from_end"
+path = "src/bin/profile_from_end.rs"
+# Benchmarks and profiling tools: they set node capacities and read node
+# internals, so they build only with the `internal` feature.
+required-features = ["internal"]
+
+[[bin]]
+name = "profile_get"
+path = "src/bin/profile_get.rs"
+# Benchmarks and profiling tools: they set node capacities and read node
+# internals, so they build only with the `internal` feature.
+required-features = ["internal"]
+
+[[bin]]
+name = "profile_get_small"
+path = "src/bin/profile_get_small.rs"
+# Benchmarks and profiling tools: they set node capacities and read node
+# internals, so they build only with the `internal` feature.
+required-features = ["internal"]
+
+[[bin]]
+name = "profile_get_std"
+path = "src/bin/profile_get_std.rs"
+# Benchmarks and profiling tools: they set node capacities and read node
+# internals, so they build only with the `internal` feature.
+required-features = ["internal"]
+
+[[bin]]
+name = "profile_insert"
+path = "src/bin/profile_insert.rs"
+# Benchmarks and profiling tools: they set node capacities and read node
+# internals, so they build only with the `internal` feature.
+required-features = ["internal"]
+
+[[bin]]
+name = "profile_insert_delete"
+path = "src/bin/profile_insert_delete.rs"
+# Benchmarks and profiling tools: they set node capacities and read node
+# internals, so they build only with the `internal` feature.
+required-features = ["internal"]
+
+[[bin]]
+name = "profile_iterate"
+path = "src/bin/profile_iterate.rs"
+# Benchmarks and profiling tools: they set node capacities and read node
+# internals, so they build only with the `internal` feature.
+required-features = ["internal"]
+
+[[bin]]
+name = "profile_iterate_std"
+path = "src/bin/profile_iterate_std.rs"
+# Benchmarks and profiling tools: they set node capacities and read node
+# internals, so they build only with the `internal` feature.
+required-features = ["internal"]
+
+[[bin]]
+name = "profile_partial_iter"
+path = "src/bin/profile_partial_iter.rs"
+# Benchmarks and profiling tools: they set node capacities and read node
+# internals, so they build only with the `internal` feature.
+required-features = ["internal"]
+
+[[bin]]
+name = "profile_random_ops"
+path = "src/bin/profile_random_ops.rs"
+# Benchmarks and profiling tools: they set node capacities and read node
+# internals, so they build only with the `internal` feature.
+required-features = ["internal"]
+
+[[bin]]
+name = "profile_range"
+path = "src/bin/profile_range.rs"
+# Benchmarks and profiling tools: they set node capacities and read node
+# internals, so they build only with the `internal` feature.
+required-features = ["internal"]
+
+[[bin]]
+name = "profile_range_cycles"
+path = "src/bin/profile_range_cycles.rs"
+# Benchmarks and profiling tools: they set node capacities and read node
+# internals, so they build only with the `internal` feature.
+required-features = ["internal"]
+
+[[bin]]
+name = "profile_range_detailed"
+path = "src/bin/profile_range_detailed.rs"
+# Benchmarks and profiling tools: they set node capacities and read node
+# internals, so they build only with the `internal` feature.
+required-features = ["internal"]
+
+[[bin]]
+name = "profile_range_instrumented"
+path = "src/bin/profile_range_instrumented.rs"
+# Benchmarks and profiling tools: they set node capacities and read node
+# internals, so they build only with the `internal` feature.
+required-features = ["internal"]
+
+[[bin]]
+name = "profile_range_manual"
+path = "src/bin/profile_range_manual.rs"
+# Benchmarks and profiling tools: they set node capacities and read node
+# internals, so they build only with the `internal` feature.
+required-features = ["internal"]
+
+[[bin]]
+name = "profile_range_std"
+path = "src/bin/profile_range_std.rs"
+# Benchmarks and profiling tools: they set node capacities and read node
+# internals, so they build only with the `internal` feature.
+required-features = ["internal"]
+
+[[bin]]
+name = "profile_range_std_detailed"
+path = "src/bin/profile_range_std_detailed.rs"
+# Benchmarks and profiling tools: they set node capacities and read node
+# internals, so they build only with the `internal` feature.
+required-features = ["internal"]
+
+[[bin]]
+name = "profile_range_std_manual"
+path = "src/bin/profile_range_std_manual.rs"
+# Benchmarks and profiling tools: they set node capacities and read node
+# internals, so they build only with the `internal` feature.
+required-features = ["internal"]
+
+[[bin]]
+name = "profile_std_btree"
+path = "src/bin/profile_std_btree.rs"
+# Benchmarks and profiling tools: they set node capacities and read node
+# internals, so they build only with the `internal` feature.
+required-features = ["internal"]
+
+[[example]]
+name = "gen_trace"
+path = "examples/gen_trace.rs"
+required-features = ["internal"]
+
+[[example]]
+name = "insert_only"
+path = "examples/insert_only.rs"
+required-features = ["internal"]
+
+[[example]]
+name = "perf_probe"
+path = "examples/perf_probe.rs"
+required-features = ["internal"]

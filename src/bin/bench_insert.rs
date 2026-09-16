@@ -70,20 +70,20 @@ struct BenchResult {
 }
 
 fn bench_current(dataset: &[(u64, u64)], lookups: &[u64], cap: usize) -> BenchResult {
-    let mut map = BPlusTreeMap::new(cap).expect("current new");
+    let mut map = BPlusTreeMap::with_capacity(cap);
     let insert = time_insert(&mut map, dataset);
     let get = time_get(|k| map.get(k), lookups);
     let iterate = time_iterate(&map);
 
     // For delete benchmark, create a fresh map
-    let mut map_for_delete = BPlusTreeMap::new(cap).expect("current new for delete");
+    let mut map_for_delete = BPlusTreeMap::with_capacity(cap);
     for &(k, v) in dataset {
         map_for_delete.insert(k, v);
     }
     let delete = time_delete(&mut map_for_delete, lookups);
 
     // For mixed operations benchmark
-    let mut map_for_mixed = BPlusTreeMap::new(cap).expect("current new for mixed");
+    let mut map_for_mixed = BPlusTreeMap::with_capacity(cap);
     let mixed = time_mixed_operations(&mut map_for_mixed, dataset, lookups);
 
     BenchResult {
@@ -97,7 +97,7 @@ fn bench_current(dataset: &[(u64, u64)], lookups: &[u64], cap: usize) -> BenchRe
 }
 
 // fn bench_previous(dataset: &[(u64, u64)], lookups: &[u64], cap: usize) -> BenchResult {
-//     let mut map = OldBPlusTreeMap::new(cap).expect("previous new");
+//     let mut map = OldBPlusTreeMap::with_capacity(cap);
 //     let insert = time_insert(&mut map, dataset);
 //     let get = time_get(|k| map.get(k), lookups);
 //     BenchResult {
@@ -271,9 +271,9 @@ impl DeleteBenchmark for BPlusTreeMap<u64, u64> {
 }
 
 impl IterateBenchmark for BPlusTreeMap<u64, u64> {
-    type Iter<'a> = bplustree::Items<'a, u64, u64>;
+    type Iter<'a> = bplustree::Iter<'a, u64, u64>;
     fn iter(&self) -> Self::Iter<'_> {
-        self.items()
+        self.iter()
     }
 }
 

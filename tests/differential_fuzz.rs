@@ -88,8 +88,7 @@ fn run_differential_caps(
     let ops = if cfg!(miri) { ops.min(300) } else { ops };
     let mut rng = Rng(seed);
     let live = Arc::new(AtomicUsize::new(0));
-    let mut tree: BPlusTreeMap<i64, Tracked> =
-        BPlusTreeMap::with_caps(leaf_cap, branch_cap).unwrap();
+    let mut tree: BPlusTreeMap<i64, Tracked> = BPlusTreeMap::with_capacities(leaf_cap, branch_cap);
     let mut model: BTreeMap<i64, i64> = BTreeMap::new();
     let ctx = |op: usize| {
         format!(
@@ -237,18 +236,18 @@ fn run_differential_caps(
             // first/last + full iteration (4%)
             95..=98 => {
                 assert_eq!(
-                    tree.first().map(|(k, v)| (*k, v.get())),
+                    tree.first_key_value().map(|(k, v)| (*k, v.get())),
                     model.iter().next().map(|(k, v)| (*k, *v)),
                     "first mismatch: {}",
                     ctx(op)
                 );
                 assert_eq!(
-                    tree.last().map(|(k, v)| (*k, v.get())),
+                    tree.last_key_value().map(|(k, v)| (*k, v.get())),
                     model.iter().next_back().map(|(k, v)| (*k, *v)),
                     "last mismatch: {}",
                     ctx(op)
                 );
-                let got: Vec<(i64, i64)> = tree.items().map(|(k, v)| (*k, v.get())).collect();
+                let got: Vec<(i64, i64)> = tree.iter().map(|(k, v)| (*k, v.get())).collect();
                 let exp: Vec<(i64, i64)> = model.iter().map(|(k, v)| (*k, *v)).collect();
                 assert_eq!(got, exp, "full iteration mismatch: {}", ctx(op));
             }

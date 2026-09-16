@@ -133,7 +133,7 @@ fn bench_bplustree(
     leaf_cap: usize,
     branch_cap: usize,
 ) -> Timings {
-    let mut map = BPlusTreeMap::with_caps(leaf_cap, branch_cap).expect("valid capacities");
+    let mut map = BPlusTreeMap::with_capacities(leaf_cap, branch_cap);
     let build = time(|| {
         for (value, &key) in insertion_order.iter().enumerate() {
             black_box(map.insert(key, value));

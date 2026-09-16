@@ -10,7 +10,7 @@ fn main() {
 
     // Phase 1: Build the tree
     println!("Phase 1: Building tree with {} items...", n);
-    let mut map = BPlusTreeMap::new(cap).expect("new");
+    let mut map = BPlusTreeMap::with_capacity(cap);
 
     let mut state: u64 = 0x123456789abcdef0;
     let mut keys = Vec::with_capacity(n);
