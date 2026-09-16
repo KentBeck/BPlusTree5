@@ -274,17 +274,106 @@ gave up 60 more lines than they gained.
 
 One arm was deliberately left at the time. `child_for_key` in
 `common.rs` still returned an `Option`, because the lookup paths that
-share it were not yet modelled. Once they were (`leafForKeyH_sim` and the
-read simulations), the same argument applied and the `Option` went too:
-`child_for_key` now returns the child, `leaf_for_key`'s loop is one line,
-and `remove_rec` and `insert_rec` no longer unwrap a value that was
-always there.
+share it were not yet modelled. It went in a second pass, described
+next.
+
+## The second pass: `child_for_key`
+
+**The situation.** `child_for_key` is the one descent step every
+operation shares: given a branch and a key, binary-search the separators
+and return the child after the last separator `<= key`, with its index.
+It read the slot through `NonNull::new` and returned an `Option`, and
+each of its three callers handled the `None` in its own idiom:
+
+```rust
+// common.rs, leaf_for_key
+NodeTag::Branch => {
+    if let Some((child, _)) = self.child_for_key(cur, key) {
+        cur = child;
+    } else {
+        return None;
+    }
+}
+// delete.rs, remove_rec
+let (child, idx) = self.child_for_key(node, key)?;
+// insert.rs, insert_rec
+let (child, child_idx) = self.child_for_key(node, &key).expect("child must exist");
+```
+
+Three callers, three different opinions about the same impossible case:
+`get` would report the key absent, `remove` would report it absent, and
+`insert` would panic. That disagreement is itself a sign that nobody had
+a scenario in mind. When the first cleanup landed, the `Option` stayed
+because `child_for_key` is shared with the lookup paths, and at that
+point only insert and remove were modelled; removing a guard on the
+strength of a proof that did not cover one of its callers would have been
+borrowing against work not yet done.
+
+**What the proof showed.** Two facts, one per level. On the tree model,
+a branch is `c0 :: es`, so it has exactly `len + 1` children, and the
+descent picks `lastChild c0 (es.takeWhile (sepLE k))`, whose index is the
+length of a prefix of `es` and so at most `len`; the slot exists. That
+much was already true in the insert and remove proofs. What was missing
+was the same fact for lookups, and for the pointer rather than the
+index. The heap model supplied both. Its descent reads the child through
+`h.get`, which returns `none` for an unallocated id, and the simulation
+theorems for every operation that descends (`insertRecH_sim`,
+`removeRecH_sim`, and once the reads were modelled `leafForKeyH_sim`,
+which `getH_sim`, `firstH_sim`, `lastH_sim` and `rangeH_sim` all go
+through) conclude that the operation never faults. A descent that never
+faults never reads a missing child. With `leafForKeyH_sim` in place,
+every caller of `child_for_key` sat under a theorem saying its `None`
+branch is unreachable.
+
+**How it showed it.** `leafForKeyH_sim` is stated for a subtree with
+the bookkeeping `Sub h d id t ids lv`, which says the walk from `id`
+reaches ids `ids` and abstracts to the tree `t`. Its proof is an
+induction on the height. In the branch case the picked child
+`lastChild c0 (es.takeWhile (sepLE k))` has its own `Sub` at one level
+down, obtained by the same splitting of the children's walk that the
+insert and remove proofs use, and the induction hypothesis then produces
+the leaf. Nowhere is there a case for "the child id is not in the
+store": the `Sub` of the child says it is, and the proof would not go
+through without it. The absence of that case is the finding. The same
+pattern appears in `insertRecH_sim` and `removeRecH_sim`, where the
+recursive call is on the child's `Sub` and its first line is a `match`
+on `h.get id` whose `none` arm is closed by `hsub.reach`, the walk
+having visited the id.
+
+**The code we eliminated.** `child_for_key` now returns the pair:
+
+```rust
+pub(crate) unsafe fn child_for_key(&self, branch: NonNull<u8>, key: &K) -> (NonNull<u8>, usize) {
+    ...
+    debug_assert!(child_idx <= len, "child index out of range");
+    let child_ptr = *(parts.children_ptr.add(child_idx) as *const *mut u8);
+    (NonNull::new_unchecked(child_ptr), child_idx)
+}
+```
+
+and the three callers lost their three idioms:
+
+```rust
+NodeTag::Branch => cur = self.child_for_key(cur, key).0,
+let (child, idx) = self.child_for_key(node, key);
+let (child, child_idx) = self.child_for_key(node, &key);
+```
+
+Small in lines (nine out, three in), but it removed the last place in
+the tree where a null child was a possibility the code entertained, and
+with it the last disagreement about what to do if one appeared. The
+`debug_assert!` states the index bound the tree-model theorems give; the
+doc comment names the heap-model theorems for the pointer. The full gate
+(`cargo test`, the replay, and the four Miri suites) was run before the
+change went to `main`, since a `new_unchecked` is exactly what Miri is
+there to check.
 
 ## What to take from it
 
 Defensive code is a claim about reachability, and reachability is a
 statement about every input, which is the one kind of statement tests do
-not make. A proof forces the question on every branch: either the
+not make. The second pass adds a corollary: remove a guard only once the
+proof covers every caller of it, and until then leave it and say why. A proof forces the question on every branch: either the
 argument goes through the branch, or the branch is dismissed by
 contradiction, and the second outcome is a finding. Here the findings
 were not bugs. The code was correct with the arms in. But the arms
