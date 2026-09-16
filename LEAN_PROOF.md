@@ -5,8 +5,10 @@ of it with machine-checked proofs that the map is correct and that its
 memory discipline is sound, at the level of nodes and slots. This
 document says what was proved, how the proof is connected to the Rust,
 what it changed in the Rust, and what it does not cover. It is the
-companion to `LEAN_VERIFICATION_PLAN.md` (the plan and its phases) and
-`lean/README.md` (the files and how to run them).
+companion to `LEAN_VERIFICATION_PLAN.md` (the plan and its phases),
+`lean/README.md` (the files and how to run them), and
+`PROOF_GUIDED_CLEANUP.md` (a worked example of the proofs removing dead
+code).
 
 ## The one-paragraph version
 
@@ -223,6 +225,16 @@ generic "window" lemma handles all six repairs of remove at once.
    `insertH_sim` backwards: what the store is and how a simulation is
    stated.
 5. `Proofs/HeapLedger.lean` (`runH_ledger`): the end-to-end statement.
+6. `PROOF_GUIDED_CLEANUP.md`: a worked example of the proofs changing the
+   code. It walks through the removal of the defensive arms in
+   `delete.rs` and then of `child_for_key`'s `Option`, showing the exact
+   proof steps that dismissed each arm, and is the best single read for
+   what "the proof forces every branch to be accounted for" means in
+   practice.
+7. `LEAN_VERIFICATION_PLAN.md`: the plan the work followed, phase by
+   phase, with the findings each phase produced and what remains out of
+   scope; read it for the history and the decisions rather than the
+   results.
 
 Every function in `src/` that has a theorem carries a `/// Lean:` line
 naming it; start from the Rust if that is the side you know.
