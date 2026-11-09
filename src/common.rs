@@ -5,8 +5,9 @@ use alloc::string::String;
 use core::borrow::Borrow;
 use core::ptr::NonNull;
 
-use crate::layout;
-use crate::{BPlusTreeMap, NodeHdr, NodeTag};
+use crate::layout::NodeTag;
+use crate::node::{self, BranchRef, LeafRef};
+use crate::BPlusTreeMap;
 
 #[cfg(any(test, feature = "internal"))]
 pub(crate) struct ValidationState<K> {
@@ -35,51 +36,28 @@ impl<K: Ord + Clone> ValidationState<K> {
 }
 
 impl<K, V> BPlusTreeMap<K, V> {
+    /// View `node` as a leaf of this map.
+    ///
+    /// SAFETY: `node` must be a live leaf of this map; see [`LeafRef::new`].
+    #[inline(always)]
+    pub(crate) unsafe fn leaf(&self, node: NonNull<u8>) -> LeafRef<K, V> {
+        LeafRef::new(node, &self.leaf_layout)
+    }
+
+    /// View `node` as a branch of this map.
+    ///
+    /// SAFETY: `node` must be a live branch of this map; see
+    /// [`BranchRef::new`].
+    #[inline(always)]
+    pub(crate) unsafe fn branch(&self, node: NonNull<u8>) -> BranchRef<K> {
+        BranchRef::new(node, &self.branch_layout)
+    }
+
     /// Number of keys a node currently holds. The header is shared by both
     /// node kinds, so this works for leaves and branches alike.
     #[inline(always)]
     pub(crate) unsafe fn node_len(&self, node: NonNull<u8>) -> usize {
-        (*(node.as_ptr() as *const NodeHdr)).len as usize
-    }
-
-    #[inline(always)]
-    pub(crate) unsafe fn shift_right(
-        &self,
-        keys_ptr: *mut K,
-        vals_ptr: *mut V,
-        idx: usize,
-        len: usize,
-    ) {
-        if idx < len {
-            core::ptr::copy(keys_ptr.add(idx), keys_ptr.add(idx + 1), len - idx);
-            core::ptr::copy(vals_ptr.add(idx), vals_ptr.add(idx + 1), len - idx);
-        }
-    }
-
-    #[inline(always)]
-    pub(crate) unsafe fn write_kv_at(
-        &self,
-        keys_ptr: *mut K,
-        vals_ptr: *mut V,
-        idx: usize,
-        key: K,
-        val: V,
-    ) {
-        core::ptr::write(keys_ptr.add(idx), key);
-        core::ptr::write(vals_ptr.add(idx), val);
-    }
-
-    #[inline(always)]
-    pub(crate) unsafe fn write_key_at(&self, keys_ptr: *mut K, idx: usize, key: K) {
-        core::ptr::write(keys_ptr.add(idx), key);
-    }
-
-    #[inline]
-    pub(crate) unsafe fn key_clone_at(&self, keys_ptr: *const K, idx: usize) -> K
-    where
-        K: Clone,
-    {
-        (*keys_ptr.add(idx)).clone()
+        node::len(node)
     }
 
     /// Centralized binary search for keys in a node.
@@ -93,62 +71,20 @@ impl<K, V> BPlusTreeMap<K, V> {
         keys.binary_search_by(|k| k.borrow().cmp(target))
     }
 
-    /// Bulk-move `count` key/value pairs from one node's arrays to another's.
-    /// Both halves of the split/merge inverse pair use this. Source slots are
-    /// left logically vacated: occupancy is defined by hdr.len.
-    #[inline(always)]
-    pub(crate) unsafe fn move_kv_range(
-        &self,
-        src_keys: *const K,
-        src_vals: *const V,
-        src_idx: usize,
-        dst_keys: *mut K,
-        dst_vals: *mut V,
-        dst_idx: usize,
-        count: usize,
-    ) {
-        core::ptr::copy_nonoverlapping(src_keys.add(src_idx), dst_keys.add(dst_idx), count);
-        core::ptr::copy_nonoverlapping(src_vals.add(src_idx), dst_vals.add(dst_idx), count);
-    }
-
-    /// Move a key-value pair from one location to another. The source slot is
-    /// left logically vacated: node occupancy is defined solely by hdr.len,
-    /// so callers must exclude the slot from the live range or overwrite it.
-    #[inline(always)]
-    pub(crate) unsafe fn move_kv_at(
-        &self,
-        src_keys_ptr: *mut K,
-        src_vals_ptr: *mut V,
-        src_idx: usize,
-        dst_keys_ptr: *mut K,
-        dst_vals_ptr: *mut V,
-        dst_idx: usize,
-    ) {
-        let key = core::ptr::read(src_keys_ptr.add(src_idx));
-        let val = core::ptr::read(src_vals_ptr.add(src_idx));
-        core::ptr::write(dst_keys_ptr.add(dst_idx), key);
-        core::ptr::write(dst_vals_ptr.add(dst_idx), val);
-    }
-
     /// Splice `new_right` into the leaf chain immediately after `leaf`.
     /// Inverse of `unlink_leaf`; the two are the only places that edit the
     /// sibling chain, so the doubly-linked invariant is auditable here.
     #[inline]
     pub(crate) unsafe fn link_leaf_after(&self, leaf: NonNull<u8>, new_right: NonNull<u8>) {
-        let l = layout::carve_leaf::<K, V>(leaf, &self.leaf_layout);
-        let r = layout::carve_leaf::<K, V>(new_right, &self.leaf_layout);
-        let old_next = *l.next_ptr;
+        let l = self.leaf(leaf);
+        let r = self.leaf(new_right);
+        let old_next = l.next();
 
-        *l.next_ptr = new_right.as_ptr();
-        *r.next_ptr = old_next;
-        if let Some(prev_ptr) = r.prev_ptr {
-            *prev_ptr = leaf.as_ptr();
-        }
-        if let Some(old) = NonNull::new(old_next) {
-            let o = layout::carve_leaf::<K, V>(old, &self.leaf_layout);
-            if let Some(prev_ptr) = o.prev_ptr {
-                *prev_ptr = new_right.as_ptr();
-            }
+        l.set_next(Some(new_right));
+        r.set_next(old_next);
+        r.set_prev(Some(leaf));
+        if let Some(old) = old_next {
+            self.leaf(old).set_prev(Some(new_right));
         }
     }
 
@@ -156,82 +92,19 @@ impl<K, V> BPlusTreeMap<K, V> {
     /// Inverse of `link_leaf_after`.
     #[inline]
     pub(crate) unsafe fn unlink_leaf(&self, leaf: NonNull<u8>) {
-        let parts = layout::carve_leaf::<K, V>(leaf, &self.leaf_layout);
-        let next = *parts.next_ptr;
-        let prev = match parts.prev_ptr {
-            Some(prev_ptr) => *prev_ptr,
-            None => core::ptr::null_mut(),
-        };
+        let l = self.leaf(leaf);
+        let next = l.next();
+        let prev = l.prev();
 
-        if let Some(prev_leaf) = NonNull::new(prev) {
-            let p = layout::carve_leaf::<K, V>(prev_leaf, &self.leaf_layout);
-            *p.next_ptr = next;
+        if let Some(prev_leaf) = prev {
+            self.leaf(prev_leaf).set_next(next);
         }
-        if let Some(next_leaf) = NonNull::new(next) {
-            let n = layout::carve_leaf::<K, V>(next_leaf, &self.leaf_layout);
-            if let Some(prev_ptr) = n.prev_ptr {
-                *prev_ptr = prev;
-            }
+        if let Some(next_leaf) = next {
+            self.leaf(next_leaf).set_prev(prev);
         }
 
-        *parts.next_ptr = core::ptr::null_mut();
-        if let Some(prev_ptr) = parts.prev_ptr {
-            *prev_ptr = core::ptr::null_mut();
-        }
-    }
-
-    /// Shift a branch's keys `[idx..len)` and children `[idx+1..=len)` one
-    /// slot right, opening key slot `idx` and child slot `idx + 1` (a new
-    /// separator and the child to its right). Inverse of `branch_close_gap`.
-    #[inline(always)]
-    pub(crate) unsafe fn branch_open_gap(
-        &self,
-        keys: *mut K,
-        children: *mut *mut u8,
-        idx: usize,
-        len: usize,
-    ) {
-        core::ptr::copy(keys.add(idx), keys.add(idx + 1), len - idx);
-        core::ptr::copy(children.add(idx + 1), children.add(idx + 2), len - idx);
-    }
-
-    /// Shift a branch's keys `[idx+1..len)` and children `[idx+2..=len)` one
-    /// slot left, closing key slot `idx` and child slot `idx + 1`.
-    /// Inverse of `branch_open_gap`.
-    #[inline(always)]
-    pub(crate) unsafe fn branch_close_gap(
-        &self,
-        keys: *mut K,
-        children: *mut *mut u8,
-        idx: usize,
-        len: usize,
-    ) {
-        core::ptr::copy(keys.add(idx + 1), keys.add(idx), len - idx - 1);
-        core::ptr::copy(children.add(idx + 2), children.add(idx + 1), len - idx - 1);
-    }
-
-    /// Shift key-value pairs left by one position (used after deletion).
-    /// This batches the key and value copy operations together.
-    #[inline(always)]
-    pub(crate) unsafe fn shift_left_kv(
-        &self,
-        keys_ptr: *mut K,
-        vals_ptr: *mut V,
-        start_idx: usize,
-        count: usize,
-    ) {
-        if count > 0 {
-            core::ptr::copy(
-                keys_ptr.add(start_idx + 1) as *const K,
-                keys_ptr.add(start_idx) as *mut K,
-                count,
-            );
-            core::ptr::copy(
-                vals_ptr.add(start_idx + 1) as *const V,
-                vals_ptr.add(start_idx) as *mut V,
-                count,
-            );
-        }
+        l.set_next(None);
+        l.set_prev(None);
     }
 }
 
@@ -253,16 +126,13 @@ impl<K: Ord, V> BPlusTreeMap<K, V> {
         K: Borrow<Q>,
         Q: Ord + ?Sized,
     {
-        let parts = layout::carve_branch::<K>(branch, &self.branch_layout);
-        let len = (*parts.hdr).len as usize;
-        let keys = core::slice::from_raw_parts(parts.keys_ptr as *const K, len);
-        let child_idx = match self.binary_search_keys(keys, key) {
+        let b = self.branch(branch);
+        let child_idx = match self.binary_search_keys(b.keys(), key) {
             Ok(i) => i + 1,
             Err(i) => i,
         };
-        debug_assert!(child_idx <= len, "child index out of range");
-        let child_ptr = *(parts.children_ptr.add(child_idx) as *const *mut u8);
-        (NonNull::new_unchecked(child_ptr), child_idx)
+        debug_assert!(child_idx <= b.len(), "child index out of range");
+        (b.child(child_idx), child_idx)
     }
 
     /// Lean: `leafForKey_spec` (`Proofs/Read.lean`): the entries split into
@@ -279,8 +149,7 @@ impl<K: Ord, V> BPlusTreeMap<K, V> {
         let mut cur = self.root?;
         unsafe {
             loop {
-                let hdr = &*(cur.as_ptr() as *const NodeHdr);
-                match hdr.tag {
+                match node::tag(cur) {
                     NodeTag::Leaf => return Some(cur),
                     NodeTag::Branch => cur = self.child_for_key(cur, key).0,
                 }
@@ -295,17 +164,9 @@ impl<K: Ord, V> BPlusTreeMap<K, V> {
         let mut cur = self.root?;
         unsafe {
             loop {
-                let hdr = &*(cur.as_ptr() as *const NodeHdr);
-                match hdr.tag {
+                match node::tag(cur) {
                     NodeTag::Leaf => return Some(cur),
-                    NodeTag::Branch => {
-                        let b = layout::carve_branch::<K>(cur, &self.branch_layout);
-                        let child_ptr = *(b.children_ptr as *const *mut u8);
-                        if child_ptr.is_null() {
-                            return None;
-                        }
-                        cur = NonNull::new_unchecked(child_ptr);
-                    }
+                    NodeTag::Branch => cur = self.branch(cur).child_or_null(0)?,
                 }
             }
         }
@@ -319,17 +180,11 @@ impl<K: Ord + Clone, V> BPlusTreeMap<K, V> {
         let mut cur = self.root?;
         unsafe {
             loop {
-                let hdr = &*(cur.as_ptr() as *const NodeHdr);
-                match hdr.tag {
+                match node::tag(cur) {
                     NodeTag::Leaf => return Some(cur),
                     NodeTag::Branch => {
-                        let b = layout::carve_branch::<K>(cur, &self.branch_layout);
-                        let len = (*b.hdr).len as usize;
-                        let child_ptr = *(b.children_ptr.add(len) as *const *mut u8);
-                        if child_ptr.is_null() {
-                            return None;
-                        }
-                        cur = NonNull::new_unchecked(child_ptr);
+                        let b = self.branch(cur);
+                        cur = b.child_or_null(b.len())?;
                     }
                 }
             }
@@ -341,7 +196,7 @@ impl<K: Ord + Clone, V> BPlusTreeMap<K, V> {
     pub fn is_leaf_root(&self) -> bool {
         match self.root {
             None => true,
-            Some(p) => unsafe { (*((p.as_ptr()) as *const NodeHdr)).tag == NodeTag::Leaf },
+            Some(p) => unsafe { node::tag(p) == NodeTag::Leaf },
         }
     }
 
@@ -349,19 +204,14 @@ impl<K: Ord + Clone, V> BPlusTreeMap<K, V> {
     #[doc(hidden)]
     pub fn leaf_count(&self) -> usize {
         let mut count = 0usize;
-        let mut cur = match self.leftmost_leaf() {
-            Some(p) => p.as_ptr(),
-            None => core::ptr::null_mut(),
-        };
+        let mut cur = self.leftmost_leaf();
         unsafe {
-            while !cur.is_null() {
-                let hdr = &*(cur as *const NodeHdr);
-                if hdr.tag != NodeTag::Leaf {
+            while let Some(leaf) = cur {
+                if node::tag(leaf) != NodeTag::Leaf {
                     break;
                 }
                 count += 1;
-                let next_ptr = (cur.add(self.leaf_layout.next_off)) as *const *mut u8;
-                cur = *next_ptr;
+                cur = self.leaf(leaf).next();
             }
         }
         count
@@ -395,9 +245,7 @@ impl<K: Ord + Clone, V> BPlusTreeMap<K, V> {
                 self.validate_node(root, None, None, true, &mut state)?;
 
                 if let Some(last_leaf) = state.prev_leaf {
-                    let next_ptr =
-                        *(last_leaf.as_ptr().add(self.leaf_layout.next_off) as *const *mut u8);
-                    if !next_ptr.is_null() {
+                    if self.leaf(last_leaf).next().is_some() {
                         return Err("Tail leaf next pointer should be null".into());
                     }
                 }
@@ -425,8 +273,7 @@ impl<K: Ord + Clone, V> BPlusTreeMap<K, V> {
         is_root: bool,
         state: &mut ValidationState<K>,
     ) -> Result<usize, String> {
-        let hdr = &*(node.as_ptr() as *const NodeHdr);
-        match hdr.tag {
+        match node::tag(node) {
             NodeTag::Leaf => self.validate_leaf(node, lower, upper, is_root, state),
             NodeTag::Branch => self.validate_branch(node, lower, upper, is_root, state),
         }
@@ -441,16 +288,15 @@ impl<K: Ord + Clone, V> BPlusTreeMap<K, V> {
         is_root: bool,
         state: &mut ValidationState<K>,
     ) -> Result<usize, String> {
-        let parts = layout::carve_leaf::<K, V>(leaf, &self.leaf_layout);
-        let len = (*parts.hdr).len as usize;
-        self.validate_leaf_occupancy(len, is_root)?;
-        if len == 0 {
+        let l = self.leaf(leaf);
+        self.validate_leaf_occupancy(l.len(), is_root)?;
+        if l.len() == 0 {
             return Ok(0);
         }
 
-        let keys = core::slice::from_raw_parts(parts.keys_ptr as *const K, len);
+        let keys = l.keys();
         self.validate_leaf_key_order_and_bounds(keys, lower, upper)?;
-        self.validate_leaf_chain_position(leaf, parts.prev_ptr, state.prev_leaf)?;
+        self.validate_leaf_chain_position(l, state.prev_leaf)?;
         state.observe_leaf(leaf, keys)?;
         Ok(0)
     }
@@ -504,26 +350,24 @@ impl<K: Ord + Clone, V> BPlusTreeMap<K, V> {
     #[cfg(any(test, feature = "internal"))]
     unsafe fn validate_leaf_chain_position(
         &self,
-        leaf: NonNull<u8>,
-        leaf_prev_ptr: Option<*mut *mut u8>,
+        leaf: LeafRef<K, V>,
         expected_prev: Option<NonNull<u8>>,
     ) -> Result<(), String> {
         if let Some(prev_leaf) = expected_prev {
-            let prev_next = *(prev_leaf.as_ptr().add(self.leaf_layout.next_off) as *const *mut u8);
-            if prev_next != leaf.as_ptr() {
+            if self.leaf(prev_leaf).next() != Some(leaf.node()) {
                 return Err("Leaf next pointer mismatch".into());
             }
         }
 
-        if let Some(prev_ptr) = leaf_prev_ptr {
+        if leaf.has_prev_link() {
             match expected_prev {
                 Some(prev) => {
-                    if *prev_ptr != prev.as_ptr() {
+                    if leaf.prev() != Some(prev) {
                         return Err("Leaf prev pointer mismatch".into());
                     }
                 }
                 None => {
-                    if !(*prev_ptr).is_null() {
+                    if leaf.prev().is_some() {
                         return Err("First leaf prev pointer should be null".into());
                     }
                 }
@@ -541,9 +385,9 @@ impl<K: Ord + Clone, V> BPlusTreeMap<K, V> {
         is_root: bool,
         state: &mut ValidationState<K>,
     ) -> Result<usize, String> {
-        let parts = layout::carve_branch::<K>(branch, &self.branch_layout);
-        let len = (*parts.hdr).len as usize;
-        let cap = self.branch_layout.cap as usize;
+        let b = self.branch(branch);
+        let len = b.len();
+        let cap = b.cap();
 
         if len > cap {
             return Err(format!("Branch has {} keys but capacity is {}", len, cap));
@@ -567,7 +411,7 @@ impl<K: Ord + Clone, V> BPlusTreeMap<K, V> {
             ));
         }
 
-        let keys = core::slice::from_raw_parts(parts.keys_ptr as *const K, len);
+        let keys = b.keys();
         for window in keys.windows(2) {
             if window[0] >= window[1] {
                 return Err("Branch keys not strictly increasing".into());
@@ -589,8 +433,7 @@ impl<K: Ord + Clone, V> BPlusTreeMap<K, V> {
         // same depth (the model's `WF` builds this in as its height index).
         let mut depth: Option<usize> = None;
         for i in 0..=len {
-            let child_ptr = *(parts.children_ptr.add(i) as *const *mut u8);
-            let child = match NonNull::new(child_ptr) {
+            let child = match b.child_or_null(i) {
                 Some(child) => child,
                 None => return Err("Branch child pointer is null".into()),
             };
@@ -654,8 +497,9 @@ mod tests {
     /// can reject it.
     #[test]
     fn validation_rejects_leaves_at_different_depths() {
+        use crate::layout::NodeTag;
+        use crate::node;
         use crate::node_alloc::{alloc_leaf_block, free_leaf_block};
-        use crate::{layout, NodeHdr, NodeTag};
 
         let mut tree = BPlusTreeMap::<i64, i64>::with_capacities(4, 4);
         for k in 0..64 {
@@ -665,50 +509,38 @@ mod tests {
 
         unsafe {
             let root = tree.root.unwrap();
-            let rp = layout::carve_branch::<i64>(root, &tree.branch_layout);
-            assert_eq!((*rp.hdr).tag, NodeTag::Branch);
-            let child0 = *(rp.children_ptr as *const *mut u8);
+            assert_eq!(node::tag(root), NodeTag::Branch);
+            let rb = tree.branch(root);
+            let child0 = rb.child(0);
             assert_eq!(
-                (*(child0 as *const NodeHdr)).tag,
+                node::tag(child0),
                 NodeTag::Branch,
                 "the test needs a tree of height at least 2"
             );
 
             // The first leaf under the root's second child: the leaf that
             // will follow the fake one in traversal order.
-            let mut cur = *(rp.children_ptr.add(1) as *const *mut u8);
-            while (*(cur as *const NodeHdr)).tag == NodeTag::Branch {
-                let bp = layout::carve_branch::<i64>(
-                    core::ptr::NonNull::new_unchecked(cur),
-                    &tree.branch_layout,
-                );
-                cur = *(bp.children_ptr as *const *mut u8);
+            let mut cur = rb.child(1);
+            while node::tag(cur) == NodeTag::Branch {
+                cur = tree.branch(cur).child(0);
             }
-            let next_leaf = core::ptr::NonNull::new_unchecked(cur);
-            let np = layout::carve_leaf::<i64, i64>(next_leaf, &tree.leaf_layout);
-            let saved_prev = np.prev_ptr.map(|p| *p);
+            let next_leaf = tree.leaf(cur);
+            let saved_prev = next_leaf.prev();
 
             // A leaf with two keys below every real key, at minimum fill,
             // linked ahead of `next_leaf`.
             let fake = alloc_leaf_block(&tree.leaf_layout).unwrap();
-            let fp = layout::carve_leaf::<i64, i64>(fake, &tree.leaf_layout);
-            core::ptr::write(fp.keys_ptr as *mut i64, -2);
-            core::ptr::write((fp.keys_ptr as *mut i64).add(1), -1);
-            core::ptr::write(fp.vals_ptr as *mut i64, 0);
-            core::ptr::write((fp.vals_ptr as *mut i64).add(1), 0);
-            (*fp.hdr).len = 2;
-            *fp.next_ptr = next_leaf.as_ptr();
-            if let Some(prev) = np.prev_ptr {
-                *prev = fake.as_ptr();
-            }
-            *(rp.children_ptr as *mut *mut u8) = fake.as_ptr();
+            let f = tree.leaf(fake);
+            f.insert(0, -2, 0);
+            f.insert(1, -1, 0);
+            f.set_next(Some(cur));
+            next_leaf.set_prev(Some(fake));
+            rb.set_child(0, fake);
 
             let err = tree.check_invariants_detailed().unwrap_err();
 
-            *(rp.children_ptr as *mut *mut u8) = child0;
-            if let (Some(prev), Some(saved)) = (np.prev_ptr, saved_prev) {
-                *prev = saved;
-            }
+            rb.set_child(0, child0);
+            next_leaf.set_prev(saved_prev);
             free_leaf_block(fake, &tree.leaf_layout);
 
             assert_eq!(err, "Leaves at different depths");
@@ -785,32 +617,26 @@ impl<K: Ord + Clone + core::fmt::Debug, V: core::fmt::Debug> BPlusTreeMap<K, V> 
     }
 
     unsafe fn dump_node<W: core::fmt::Write>(&self, node: NonNull<u8>, out: &mut W) {
-        let hdr = &*(node.as_ptr() as *const NodeHdr);
-        match hdr.tag {
+        match node::tag(node) {
             NodeTag::Leaf => {
-                let parts = layout::carve_leaf::<K, V>(node, &self.leaf_layout);
-                let len = (*parts.hdr).len as usize;
+                let l = self.leaf(node);
                 let _ = out.write_char('(');
-                for i in 0..len {
+                for i in 0..l.len() {
                     if i > 0 {
                         let _ = out.write_char(' ');
                     }
-                    let k = &*(parts.keys_ptr.add(i) as *const K);
-                    let v = &*(parts.vals_ptr.add(i) as *const V);
-                    let _ = write!(out, "{:?}:{:?}", k, v);
+                    let _ = write!(out, "{:?}:{:?}", l.key(i), l.val(i));
                 }
                 let _ = out.write_char(')');
             }
             NodeTag::Branch => {
-                let parts = layout::carve_branch::<K>(node, &self.branch_layout);
-                let len = (*parts.hdr).len as usize;
+                let b = self.branch(node);
                 let _ = out.write_char('[');
-                for i in 0..=len {
+                for i in 0..=b.len() {
                     if i > 0 {
-                        let k = &*(parts.keys_ptr.add(i - 1) as *const K);
-                        let _ = write!(out, " {:?} ", k);
+                        let _ = write!(out, " {:?} ", b.key(i - 1));
                     }
-                    match NonNull::new(*(parts.children_ptr.add(i) as *const *mut u8)) {
+                    match b.child_or_null(i) {
                         Some(child) => self.dump_node(child, out),
                         None => {
                             let _ = out.write_str("null");

@@ -6,13 +6,14 @@ use core::ops::{Bound, RangeBounds};
 use core::ptr::NonNull;
 
 use crate::layout;
+use crate::node::LeafRef;
 use crate::BPlusTreeMap;
 
 /// A resolved window over the leaves, walked from both ends.
 ///
 /// Both endpoints are resolved to concrete (leaf, index) positions at
 /// construction, so per-item work is an index compare plus two pointer
-/// reads — no key comparisons, no re-carving the leaf. The front and back
+/// reads — no key comparisons, no re-viewing the leaf. The front and back
 /// cursors meet in the middle; `front_leaf == None` means exhausted.
 ///
 /// The cursor yields raw slot pointers. The iterators wrap it and choose
@@ -49,6 +50,12 @@ impl<K, V> Cursor<K, V> {
         }
     }
 
+    /// View `leaf` with the cursor's layout.
+    #[inline(always)]
+    unsafe fn leaf(&self, leaf: NonNull<u8>) -> LeafRef<K, V> {
+        LeafRef::new(leaf, &self.leaf_layout)
+    }
+
     /// Step the front cursor, returning the key and value slot pointers.
     fn next_ptrs(&mut self) -> Option<(*const K, *mut V)> {
         loop {
@@ -72,19 +79,18 @@ impl<K, V> Cursor<K, V> {
 
             // Hop to the next leaf and refresh the cached view.
             unsafe {
-                let parts = layout::carve_leaf::<K, V>(leaf, &self.leaf_layout);
-                match NonNull::new(*parts.next_ptr) {
+                match self.leaf(leaf).next() {
                     None => {
                         self.front_leaf = None;
                         return None;
                     }
                     Some(next) => {
-                        let np = layout::carve_leaf::<K, V>(next, &self.leaf_layout);
+                        let n = self.leaf(next);
                         self.front_leaf = Some(next);
                         self.front_idx = 0;
-                        self.front_len = (*np.hdr).len as usize;
-                        self.front_keys = np.keys_ptr as *const K;
-                        self.front_vals = np.vals_ptr as *const V;
+                        self.front_len = n.len();
+                        self.front_keys = n.key_ptr(0);
+                        self.front_vals = n.val_ptr(0);
                     }
                 }
             }
@@ -114,19 +120,17 @@ impl<K, V> Cursor<K, V> {
 
             // Hop to the previous leaf and refresh the cached view.
             unsafe {
-                let parts = layout::carve_leaf::<K, V>(self.back_leaf, &self.leaf_layout);
-                let prev = parts.prev_ptr.and_then(|p| NonNull::new(*p));
-                match prev {
+                match self.leaf(self.back_leaf).prev() {
                     None => {
                         self.front_leaf = None;
                         return None;
                     }
                     Some(prev) => {
-                        let pp = layout::carve_leaf::<K, V>(prev, &self.leaf_layout);
+                        let p = self.leaf(prev);
                         self.back_leaf = prev;
-                        self.back_idx = (*pp.hdr).len as usize;
-                        self.back_keys = pp.keys_ptr as *const K;
-                        self.back_vals = pp.vals_ptr as *const V;
+                        self.back_idx = p.len();
+                        self.back_keys = p.key_ptr(0);
+                        self.back_vals = p.val_ptr(0);
                     }
                 }
             }
@@ -308,8 +312,7 @@ impl<K: Ord + Clone, V> BPlusTreeMap<K, V> {
         }
         // The cut is past this leaf's last key: start at the next leaf
         // (never empty, being non-root).
-        let parts = layout::carve_leaf::<K, V>(leaf, &self.leaf_layout);
-        NonNull::new(*parts.next_ptr).map(|next| (next, 0))
+        self.leaf(leaf).next().map(|next| (next, 0))
     }
 
     /// Resolve the end bound to the position one past the last in-range item.
@@ -333,8 +336,7 @@ impl<K: Ord + Clone, V> BPlusTreeMap<K, V> {
         }
         // The cut is before this leaf's first key: end at the end of the
         // previous leaf (never empty, being non-root).
-        let parts = layout::carve_leaf::<K, V>(leaf, &self.leaf_layout);
-        let prev = parts.prev_ptr.and_then(|p| NonNull::new(*p))?;
+        let prev = self.leaf(leaf).prev()?;
         Some((prev, self.node_len(prev)))
     }
 
@@ -349,15 +351,13 @@ impl<K: Ord + Clone, V> BPlusTreeMap<K, V> {
         Q: Ord + ?Sized,
     {
         let leaf = self.leaf_for_key(k)?;
-        let parts = layout::carve_leaf::<K, V>(leaf, &self.leaf_layout);
-        let len = (*parts.hdr).len as usize;
-        let keys = core::slice::from_raw_parts(parts.keys_ptr as *const K, len);
+        let keys = self.leaf(leaf).keys();
         let cut = if after_equal {
             keys.partition_point(|x| x.borrow() <= k)
         } else {
             keys.partition_point(|x| x.borrow() < k)
         };
-        Some((leaf, cut, len))
+        Some((leaf, cut, keys.len()))
     }
 
     /// Lean: `rangeTree_spec` (`Proofs/Read.lean`): the items yielded are
@@ -380,15 +380,13 @@ impl<K: Ord + Clone, V> BPlusTreeMap<K, V> {
                 None => return Cursor::empty(self.leaf_layout),
             };
 
-            let fp = layout::carve_leaf::<K, V>(front_leaf, &self.leaf_layout);
-            let front_keys = fp.keys_ptr as *const K;
-            let front_vals = fp.vals_ptr as *const V;
+            let front = self.leaf(front_leaf);
 
             // The front cursor points at the first key satisfying the start
             // bound; if that key violates the end bound the range is empty
             // (this also covers inverted bounds). Otherwise the front
             // position is strictly before the back position.
-            let first_key: &Q = (*front_keys.add(front_idx)).borrow();
+            let first_key: &Q = front.key(front_idx).borrow();
             let in_range = match end {
                 Bound::Unbounded => true,
                 Bound::Included(e) => first_key <= e,
@@ -398,18 +396,18 @@ impl<K: Ord + Clone, V> BPlusTreeMap<K, V> {
                 return Cursor::empty(self.leaf_layout);
             }
 
-            let bp = layout::carve_leaf::<K, V>(back_leaf, &self.leaf_layout);
+            let back = self.leaf(back_leaf);
             Cursor {
                 leaf_layout: self.leaf_layout,
                 front_leaf: Some(front_leaf),
                 front_idx,
-                front_len: (*fp.hdr).len as usize,
-                front_keys,
-                front_vals,
+                front_len: front.len(),
+                front_keys: front.key_ptr(0),
+                front_vals: front.val_ptr(0),
                 back_leaf,
                 back_idx,
-                back_keys: bp.keys_ptr as *const K,
-                back_vals: bp.vals_ptr as *const V,
+                back_keys: back.key_ptr(0),
+                back_vals: back.val_ptr(0),
             }
         }
     }
@@ -480,14 +478,12 @@ impl<K: Ord + Clone, V> BPlusTreeMap<K, V> {
     pub fn first_key_value(&self) -> Option<(&K, &V)> {
         let leaf = self.leftmost_leaf()?;
         unsafe {
-            let parts = layout::carve_leaf::<K, V>(leaf, &self.leaf_layout);
-            if (*parts.hdr).len == 0 {
+            let l = self.leaf(leaf);
+            // Only a root leaf can be empty.
+            if l.len() == 0 {
                 return None;
             }
-            Some((
-                &*(parts.keys_ptr as *const K),
-                &*(parts.vals_ptr as *const V),
-            ))
+            Some((l.key(0), l.val(0)))
         }
     }
 
@@ -496,16 +492,13 @@ impl<K: Ord + Clone, V> BPlusTreeMap<K, V> {
     pub fn last_key_value(&self) -> Option<(&K, &V)> {
         let leaf = self.rightmost_leaf()?;
         unsafe {
-            let parts = layout::carve_leaf::<K, V>(leaf, &self.leaf_layout);
-            let len = (*parts.hdr).len as usize;
+            let l = self.leaf(leaf);
+            let len = l.len();
             // Only a root leaf can be empty; non-root leaves hold >= min_leaf_len.
             if len == 0 {
                 return None;
             }
-            Some((
-                &*(parts.keys_ptr.add(len - 1) as *const K),
-                &*(parts.vals_ptr.add(len - 1) as *const V),
-            ))
+            Some((l.key(len - 1), l.val(len - 1)))
         }
     }
 

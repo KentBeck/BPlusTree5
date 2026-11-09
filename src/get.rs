@@ -1,6 +1,6 @@
 use core::borrow::Borrow;
 
-use crate::layout;
+use crate::node::LeafRef;
 use crate::BPlusTreeMap;
 
 impl<K: Ord + Clone, V> BPlusTreeMap<K, V> {
@@ -12,8 +12,8 @@ impl<K: Ord + Clone, V> BPlusTreeMap<K, V> {
         K: Borrow<Q>,
         Q: Ord + ?Sized,
     {
-        let (parts, idx) = self.leaf_search(key)?;
-        unsafe { Some(&*(parts.vals_ptr.add(idx) as *const V)) }
+        let (leaf, idx) = self.leaf_search(key)?;
+        Some(leaf.val(idx))
     }
 
     pub fn get_mut<Q>(&mut self, key: &Q) -> Option<&mut V>
@@ -21,8 +21,8 @@ impl<K: Ord + Clone, V> BPlusTreeMap<K, V> {
         K: Borrow<Q>,
         Q: Ord + ?Sized,
     {
-        let (parts, idx) = self.leaf_search(key)?;
-        unsafe { Some(&mut *(parts.vals_ptr.add(idx) as *mut V)) }
+        let (leaf, idx) = self.leaf_search(key)?;
+        unsafe { Some(&mut *leaf.val_ptr(idx)) }
     }
 
     /// The stored key and its value. One descent: both come from the slot
@@ -32,13 +32,8 @@ impl<K: Ord + Clone, V> BPlusTreeMap<K, V> {
         K: Borrow<Q>,
         Q: Ord + ?Sized,
     {
-        let (parts, idx) = self.leaf_search(key)?;
-        unsafe {
-            Some((
-                &*(parts.keys_ptr.add(idx) as *const K),
-                &*(parts.vals_ptr.add(idx) as *const V),
-            ))
-        }
+        let (leaf, idx) = self.leaf_search(key)?;
+        Some((leaf.key(idx), leaf.val(idx)))
     }
 
     pub fn contains_key<Q>(&self, key: &Q) -> bool
@@ -49,19 +44,18 @@ impl<K: Ord + Clone, V> BPlusTreeMap<K, V> {
         self.leaf_search(key).is_some()
     }
 
+    /// The leaf holding `key` and the key's index in it.
     /// Lean: `leafSearch_some` and `leafSearch_none` (`Proofs/Read.lean`).
-    pub(crate) fn leaf_search<Q>(&self, key: &Q) -> Option<(layout::LeafParts<K, V>, usize)>
+    pub(crate) fn leaf_search<Q>(&self, key: &Q) -> Option<(LeafRef<K, V>, usize)>
     where
         K: Borrow<Q>,
         Q: Ord + ?Sized,
     {
         let leaf = self.leaf_for_key(key)?;
         unsafe {
-            let parts = layout::carve_leaf::<K, V>(leaf, &self.leaf_layout);
-            let len = (*parts.hdr).len as usize;
-            let keys = core::slice::from_raw_parts(parts.keys_ptr as *const K, len);
-            let idx = self.binary_search_keys(keys, key).ok()?;
-            Some((parts, idx))
+            let leaf = self.leaf(leaf);
+            let idx = self.binary_search_keys(leaf.keys(), key).ok()?;
+            Some((leaf, idx))
         }
     }
 }

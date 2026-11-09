@@ -26,7 +26,7 @@
 extern crate alloc;
 
 use core::marker::PhantomData;
-use core::ptr::{self, NonNull};
+use core::ptr::NonNull;
 
 mod bulk;
 mod common;
@@ -38,6 +38,7 @@ mod insert;
 mod internal;
 mod iterate;
 mod layout;
+mod node;
 mod node_alloc;
 mod owned;
 mod serde_impls;
@@ -45,7 +46,7 @@ mod set;
 mod traits;
 
 #[cfg(not(any(test, feature = "internal")))]
-use layout::{BranchLayout, LeafLayout, NodeHdr, NodeTag};
+use layout::{BranchLayout, LeafLayout};
 use node_alloc::{free_branch_block, free_leaf_block};
 
 #[cfg(feature = "delete_profile")]
@@ -134,31 +135,27 @@ impl<K, V> BPlusTreeMap<K, V> {
     /// Lean: `dropSubtreeH_spec` (`Proofs/HeapLedger.lean`): frees exactly the
     /// subtree's nodes, each once, so each slot's contents drop exactly once.
     unsafe fn drop_subtree(&mut self, node: NonNull<u8>) {
-        let hdr = &*(node.as_ptr() as *const NodeHdr);
-        match hdr.tag {
-            NodeTag::Leaf => self.drop_leaf(node),
-            NodeTag::Branch => self.drop_branch(node),
+        match node::tag(node) {
+            layout::NodeTag::Leaf => self.drop_leaf(node),
+            layout::NodeTag::Branch => self.drop_branch(node),
         }
     }
 
     unsafe fn drop_leaf(&mut self, node: NonNull<u8>) {
-        let parts = layout::carve_leaf::<K, V>(node, &self.leaf_layout);
-        let len = (*parts.hdr).len as usize;
-        ptr::drop_in_place(ptr::slice_from_raw_parts_mut(parts.keys_ptr as *mut K, len));
-        ptr::drop_in_place(ptr::slice_from_raw_parts_mut(parts.vals_ptr as *mut V, len));
+        self.leaf(node).drop_entries();
         free_leaf_block(node, &self.leaf_layout);
     }
 
     /// Children go first so their nodes are gone before the separators
     /// that ordered them.
     unsafe fn drop_branch(&mut self, node: NonNull<u8>) {
-        let parts = layout::carve_branch::<K>(node, &self.branch_layout);
-        let len = (*parts.hdr).len as usize;
-        let children = core::slice::from_raw_parts(parts.children_ptr as *const *mut u8, len + 1);
-        for child in children.iter().filter_map(|&p| NonNull::new(p)) {
-            self.drop_subtree(child);
+        let branch = self.branch(node);
+        for i in 0..=branch.len() {
+            if let Some(child) = branch.child_or_null(i) {
+                self.drop_subtree(child);
+            }
         }
-        ptr::drop_in_place(ptr::slice_from_raw_parts_mut(parts.keys_ptr as *mut K, len));
+        branch.drop_keys();
         free_branch_block(node, &self.branch_layout);
     }
 }

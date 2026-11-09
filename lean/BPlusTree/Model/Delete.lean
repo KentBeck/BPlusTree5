@@ -62,7 +62,7 @@ def Rebalance.mergesSiblings : Rebalance → Bool
   | .mergeWithLeft | .mergeWithRight => true
   | _ => false
 
-/-- `child_len`: length of `children[idx]`. The Rust reads the slot
+/-- the child length `plan_rebalance` reads (`node::len`): length of `children[idx]`. The Rust reads the slot
 unchecked; the model needs a total function, so an index past the end
 reads as 0 (the proofs show it never is). -/
 def childLen (children : List (Node K V)) (idx : Nat) : Nat :=
@@ -108,7 +108,7 @@ def rotateLeafLeft (keys : List K) (children : List (Node K V)) (sepIdx : Nat) :
   | _, _ => (keys, children)
 
 /-- `merge_leaf_pair`: `children[leftIdx]` absorbs `children[leftIdx + 1]`;
-the separator is dropped (`remove_branch_entry`). -/
+the separator is dropped (`BranchRef::remove_entry`). -/
 def mergeLeafPair (keys : List K) (children : List (Node K V)) (leftIdx : Nat) :
     List K × List (Node K V) :=
   match children[leftIdx]?, children[leftIdx + 1]? with
@@ -144,7 +144,7 @@ def rotateBranchLeft (keys : List K) (children : List (Node K V)) (sepIdx : Nat)
   | _, _, _ => (keys, children)
 
 /-- `merge_branch_pair`: the separator moves down between the two children
-(`merge_branch_into`) and its slot closes (`remove_branch_entry`). -/
+(`merge_branch_into`) and its slot closes (`BranchRef::remove_entry`). -/
 def mergeBranchPair (keys : List K) (children : List (Node K V)) (leftIdx : Nat) :
     List K × List (Node K V) :=
   match children[leftIdx]?, children[leftIdx + 1]?, keys[leftIdx]? with

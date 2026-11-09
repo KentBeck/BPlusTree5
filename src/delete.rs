@@ -1,6 +1,8 @@
-use crate::{free_branch_block, free_leaf_block, layout, BPlusTreeMap, NodeHdr, NodeTag};
+use crate::layout::NodeTag;
+use crate::node;
+use crate::{free_branch_block, free_leaf_block, BPlusTreeMap};
 use core::borrow::Borrow;
-use core::ptr::{self, NonNull};
+use core::ptr::NonNull;
 
 /// How to refill an underfull child, chosen by `plan_rebalance`.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -77,10 +79,9 @@ impl<K: Ord + Clone, V> BPlusTreeMap<K, V> {
         self.entry_count -= 1;
 
         // Only a root branch left with one or two children can collapse;
-        // a leaf root or a wider branch skips the carve.
+        // a leaf root or a wider branch skips the check.
         unsafe {
-            let hdr = &*(root.as_ptr() as *const NodeHdr);
-            if hdr.tag == NodeTag::Branch && hdr.len <= 1 {
+            if node::tag(root) == NodeTag::Branch && node::len(root) <= 1 {
                 self.check_root_collapse(root);
             }
         }
@@ -98,17 +99,16 @@ impl<K: Ord + Clone, V> BPlusTreeMap<K, V> {
     /// Lean: `checkRootCollapseH_sim` (`Proofs/HeapRemove.lean`) frees exactly
     /// the old root (and the merged-away leaf) and keeps the rest.
     unsafe fn check_root_collapse(&mut self, root: NonNull<u8>) {
-        let parts = layout::carve_branch::<K>(root, &self.branch_layout);
-        let len = (*parts.hdr).len as usize;
+        let b = self.branch(root);
+        let len = b.len();
         debug_assert!(
             len <= 1,
             "check_root_collapse on a root with more than two children"
         );
 
-        let children = parts.children_ptr as *mut *mut u8;
-        let first = NonNull::new_unchecked(*children);
+        let first = b.child(0);
         if len == 1 {
-            let second = NonNull::new_unchecked(*children.add(1));
+            let second = b.child(1);
             if !self.try_merge_leaves(first, second) {
                 return;
             }
@@ -122,7 +122,7 @@ impl<K: Ord + Clone, V> BPlusTreeMap<K, V> {
         if !self.is_leaf(target) || !self.is_leaf(source) {
             return false;
         }
-        if self.node_len(target) + self.node_len(source) > self.leaf_layout.cap as usize {
+        if node::len(target) + node::len(source) > self.leaf_layout.cap as usize {
             return false;
         }
         self.merge_leaf_into(target, source);
@@ -149,23 +149,19 @@ impl<K: Ord + Clone, V> BPlusTreeMap<K, V> {
 
     #[inline(always)]
     unsafe fn is_leaf(&self, node: NonNull<u8>) -> bool {
-        (*(node.as_ptr() as *const NodeHdr)).tag == NodeTag::Leaf
+        node::tag(node) == NodeTag::Leaf
     }
 
     unsafe fn make_leaf_root(&self, leaf: NonNull<u8>) {
-        let parts = layout::carve_leaf::<K, V>(leaf, &self.leaf_layout);
-        if let Some(prev_ptr) = parts.prev_ptr {
-            *prev_ptr = ptr::null_mut();
-        }
+        self.leaf(leaf).set_prev(None);
     }
 
     /// Unlink an emptied leaf from the sibling chain and free its memory.
     /// The caller must already have moved every item out: this frees memory
     /// only, it never drops contents (contrast `drop_subtree`).
     unsafe fn free_emptied_leaf(&mut self, leaf: NonNull<u8>) {
-        let parts = layout::carve_leaf::<K, V>(leaf, &self.leaf_layout);
         debug_assert_eq!(
-            (*parts.hdr).len,
+            node::len(leaf),
             0,
             "free_emptied_leaf called on a leaf that still holds items"
         );
@@ -187,29 +183,15 @@ impl<K: Ord + Clone, V> BPlusTreeMap<K, V> {
             self.delete_profile.leaf_merges += 1;
         }
 
-        let t = layout::carve_leaf::<K, V>(target, &self.leaf_layout);
-        let s = layout::carve_leaf::<K, V>(source, &self.leaf_layout);
-
-        let target_len = (*t.hdr).len as usize;
-        let source_len = (*s.hdr).len as usize;
+        let t = self.leaf(target);
+        let s = self.leaf(source);
         debug_assert!(
-            target_len + source_len <= self.leaf_layout.cap as usize,
+            t.len() + s.len() <= t.cap(),
             "leaf merge would overflow: callers merge only when both halves \
              are at or below the minimum fill"
         );
 
-        self.move_kv_range(
-            s.keys_ptr as *const K,
-            s.vals_ptr as *const V,
-            0,
-            t.keys_ptr as *mut K,
-            t.vals_ptr as *mut V,
-            target_len,
-            source_len,
-        );
-
-        (*t.hdr).len = (target_len + source_len) as u16;
-        (*s.hdr).len = 0;
+        s.move_tail_to(0, t, t.len(), s.len());
     }
 
     /// Branch counterpart of `merge_leaf_into`: append `separator` and every
@@ -224,31 +206,15 @@ impl<K: Ord + Clone, V> BPlusTreeMap<K, V> {
             self.delete_profile.branch_merges += 1;
         }
 
-        let t = layout::carve_branch::<K>(target, &self.branch_layout);
-        let s = layout::carve_branch::<K>(source, &self.branch_layout);
-
-        let target_len = (*t.hdr).len as usize;
-        let source_len = (*s.hdr).len as usize;
+        let t = self.branch(target);
+        let s = self.branch(source);
         debug_assert!(
-            target_len + 1 + source_len <= self.branch_layout.cap as usize,
+            t.len() + 1 + s.len() <= t.cap(),
             "branch merge would overflow: callers merge only when both halves \
              are at or below the minimum fill"
         );
 
-        core::ptr::write((t.keys_ptr as *mut K).add(target_len), separator);
-        core::ptr::copy_nonoverlapping(
-            s.keys_ptr as *const K,
-            (t.keys_ptr as *mut K).add(target_len + 1),
-            source_len,
-        );
-        core::ptr::copy_nonoverlapping(
-            s.children_ptr as *const *mut u8,
-            (t.children_ptr as *mut *mut u8).add(target_len + 1),
-            source_len + 1,
-        );
-
-        (*t.hdr).len = (target_len + 1 + source_len) as u16;
-        (*s.hdr).len = 0;
+        t.absorb(separator, s);
     }
 
     /// Repair one known-underfull child. Returns whether repairing it made the
@@ -261,14 +227,12 @@ impl<K: Ord + Clone, V> BPlusTreeMap<K, V> {
     /// model the repair never faults, returns the same verdict, and touches
     /// only the two siblings, this branch, and the successor leaf's `prev`.
     unsafe fn fix_branch_child(&mut self, branch: NonNull<u8>, child_idx: usize) -> bool {
-        let parts = layout::carve_branch::<K>(branch, &self.branch_layout);
-        let len = (*parts.hdr).len as usize;
+        let b = self.branch(branch);
+        let len = b.len();
         debug_assert!(len > 0, "fix_branch_child on an empty branch");
         debug_assert!(child_idx <= len, "child index out of range");
 
-        let children = parts.children_ptr as *mut *mut u8;
-        let child = NonNull::new_unchecked(*children.add(child_idx));
-        let branch_lost_child = match (*(child.as_ptr() as *const NodeHdr)).tag {
+        let branch_lost_child = match node::tag(b.child(child_idx)) {
             NodeTag::Leaf => self.rebalance_leaf_child(branch, child_idx, len),
             NodeTag::Branch => self.rebalance_branch_child(branch, child_idx, len),
         };
@@ -339,17 +303,18 @@ impl<K: Ord + Clone, V> BPlusTreeMap<K, V> {
         branch_len: usize,
         min: usize,
     ) -> Rebalance {
-        let parts = layout::carve_branch::<K>(branch, &self.branch_layout);
-        let children = parts.children_ptr as *mut *mut u8;
+        let b = self.branch(branch);
         let has_left = child_idx > 0;
         let has_right = child_idx < branch_len;
 
-        let child = NonNull::new_unchecked(*children.add(child_idx));
-        debug_assert!(self.node_len(child) < min, "child must be underfull");
-        if has_left && self.child_len(children, child_idx - 1) > min {
+        debug_assert!(
+            node::len(b.child(child_idx)) < min,
+            "child must be underfull"
+        );
+        if has_left && node::len(b.child(child_idx - 1)) > min {
             return Rebalance::BorrowFromLeft;
         }
-        if has_right && self.child_len(children, child_idx + 1) > min {
+        if has_right && node::len(b.child(child_idx + 1)) > min {
             return Rebalance::BorrowFromRight;
         }
         if has_left {
@@ -357,12 +322,6 @@ impl<K: Ord + Clone, V> BPlusTreeMap<K, V> {
         }
         debug_assert!(has_right, "a child in a nonempty branch has a sibling");
         Rebalance::MergeWithRight
-    }
-
-    /// Length of `children[idx]`.
-    #[inline(always)]
-    unsafe fn child_len(&self, children: *mut *mut u8, idx: usize) -> usize {
-        self.node_len(NonNull::new_unchecked(*children.add(idx)))
     }
 
     /// Rotate one entry rightward through separator `sep_idx`: the left
@@ -379,35 +338,15 @@ impl<K: Ord + Clone, V> BPlusTreeMap<K, V> {
             self.delete_profile.branch_borrows += 1;
         }
 
-        let parts = layout::carve_branch::<K>(branch, &self.branch_layout);
-        let children = parts.children_ptr as *mut *mut u8;
-        let left = NonNull::new_unchecked(*children.add(sep_idx));
-        let right = NonNull::new_unchecked(*children.add(sep_idx + 1));
+        let b = self.branch(branch);
+        let l = self.branch(b.child(sep_idx));
+        let r = self.branch(b.child(sep_idx + 1));
+        debug_assert!(l.len() > 1, "donor would fall below minimum fill");
 
-        let l = layout::carve_branch::<K>(left, &self.branch_layout);
-        let r = layout::carve_branch::<K>(right, &self.branch_layout);
-        let left_len = (*l.hdr).len as usize;
-        let right_len = (*r.hdr).len as usize;
-        debug_assert!(left_len > 1, "donor would fall below minimum fill");
-
-        let l_keys = l.keys_ptr as *mut K;
-        let l_children = l.children_ptr as *mut *mut u8;
-        let r_keys = r.keys_ptr as *mut K;
-        let r_children = r.children_ptr as *mut *mut u8;
-        let sep_slot = (parts.keys_ptr as *mut K).add(sep_idx);
-
-        let promoted = core::ptr::read(l_keys.add(left_len - 1));
-        let moved_child = *l_children.add(left_len);
-        (*l.hdr).len = (left_len - 1) as u16;
-
-        // Open the right child's slot 0 for the incoming key and child.
-        core::ptr::copy(r_keys, r_keys.add(1), right_len);
-        core::ptr::copy(r_children, r_children.add(1), right_len + 1);
-        core::ptr::write(r_keys, core::ptr::read(sep_slot));
-        *r_children = moved_child;
-        (*r.hdr).len = (right_len + 1) as u16;
-
-        core::ptr::write(sep_slot, promoted);
+        let moved_child = l.child(l.len());
+        let promoted = l.remove_entry(l.len() - 1);
+        let old_sep = b.replace_key(sep_idx, promoted);
+        r.push_front(old_sep, moved_child);
     }
 
     /// Mirror of `rotate_branch_right`: the right child's first key moves up,
@@ -420,50 +359,27 @@ impl<K: Ord + Clone, V> BPlusTreeMap<K, V> {
             self.delete_profile.branch_borrows += 1;
         }
 
-        let parts = layout::carve_branch::<K>(branch, &self.branch_layout);
-        let children = parts.children_ptr as *mut *mut u8;
-        let left = NonNull::new_unchecked(*children.add(sep_idx));
-        let right = NonNull::new_unchecked(*children.add(sep_idx + 1));
+        let b = self.branch(branch);
+        let l = self.branch(b.child(sep_idx));
+        let r = self.branch(b.child(sep_idx + 1));
+        debug_assert!(r.len() > 1, "donor would fall below minimum fill");
 
-        let l = layout::carve_branch::<K>(left, &self.branch_layout);
-        let r = layout::carve_branch::<K>(right, &self.branch_layout);
-        let left_len = (*l.hdr).len as usize;
-        let right_len = (*r.hdr).len as usize;
-        debug_assert!(right_len > 1, "donor would fall below minimum fill");
-
-        let l_keys = l.keys_ptr as *mut K;
-        let l_children = l.children_ptr as *mut *mut u8;
-        let r_keys = r.keys_ptr as *mut K;
-        let r_children = r.children_ptr as *mut *mut u8;
-        let sep_slot = (parts.keys_ptr as *mut K).add(sep_idx);
-
-        let promoted = core::ptr::read(r_keys);
-        let moved_child = *r_children;
-
-        core::ptr::write(l_keys.add(left_len), core::ptr::read(sep_slot));
-        *l_children.add(left_len + 1) = moved_child;
-        (*l.hdr).len = (left_len + 1) as u16;
-
-        // Close the right child's slot 0 after the outgoing key and child.
-        core::ptr::copy(r_keys.add(1), r_keys, right_len - 1);
-        core::ptr::copy(r_children.add(1), r_children, right_len);
-        (*r.hdr).len = (right_len - 1) as u16;
-
-        core::ptr::write(sep_slot, promoted);
+        let (promoted, moved_child) = r.pop_front();
+        let old_sep = b.replace_key(sep_idx, promoted);
+        l.push_entry(old_sep, moved_child);
     }
 
     /// Merge the two children flanking separator `left_idx`:
     /// `children[left_idx]` absorbs `children[left_idx + 1]`, and the
-    /// separator (returned by `remove_branch_entry`) moves down between them.
+    /// separator, taken out of the branch, moves down between them.
     /// Lean: `mergeBranchPair_window`; `mergeBranchPairH_sim` on the heap
     /// (the right child is freed, nothing else is).
     unsafe fn merge_branch_pair(&mut self, branch: NonNull<u8>, left_idx: usize) {
-        let parts = layout::carve_branch::<K>(branch, &self.branch_layout);
-        let children = parts.children_ptr as *mut *mut u8;
-        let left = NonNull::new_unchecked(*children.add(left_idx));
-        let right = NonNull::new_unchecked(*children.add(left_idx + 1));
+        let b = self.branch(branch);
+        let left = b.child(left_idx);
+        let right = b.child(left_idx + 1);
 
-        let separator = self.remove_branch_entry(branch, left_idx);
+        let separator = b.remove_entry(left_idx);
         self.merge_branch_into(left, separator, right);
         self.free_emptied_branch(right);
     }
@@ -472,9 +388,8 @@ impl<K: Ord + Clone, V> BPlusTreeMap<K, V> {
     /// must already have moved or dropped every separator; use `empty_branch`
     /// for a branch that still owns its keys.
     unsafe fn free_emptied_branch(&mut self, node: NonNull<u8>) {
-        let parts = layout::carve_branch::<K>(node, &self.branch_layout);
         debug_assert_eq!(
-            (*parts.hdr).len,
+            node::len(node),
             0,
             "free_emptied_branch called on a branch that still holds separators"
         );
@@ -488,12 +403,7 @@ impl<K: Ord + Clone, V> BPlusTreeMap<K, V> {
     /// Drop the separators a branch still owns and mark it empty, so it meets
     /// `free_emptied_branch`'s precondition.
     unsafe fn empty_branch(&mut self, node: NonNull<u8>) {
-        let parts = layout::carve_branch::<K>(node, &self.branch_layout);
-        let len = (*parts.hdr).len as usize;
-        for i in 0..len {
-            ptr::drop_in_place((parts.keys_ptr as *mut K).add(i));
-        }
-        (*parts.hdr).len = 0;
+        self.branch(node).drop_keys();
     }
 
     /// Rotate one item rightward through separator `sep_idx`: the left
@@ -508,33 +418,16 @@ impl<K: Ord + Clone, V> BPlusTreeMap<K, V> {
             self.delete_profile.leaf_borrows += 1;
         }
 
-        let parts = layout::carve_branch::<K>(branch, &self.branch_layout);
-        let children = parts.children_ptr as *mut *mut u8;
-        let left = NonNull::new_unchecked(*children.add(sep_idx));
-        let right = NonNull::new_unchecked(*children.add(sep_idx + 1));
+        let b = self.branch(branch);
+        let l = self.leaf(b.child(sep_idx));
+        let r = self.leaf(b.child(sep_idx + 1));
+        debug_assert!(l.len() > 1, "donor would fall below minimum fill");
 
-        let l = layout::carve_leaf::<K, V>(left, &self.leaf_layout);
-        let r = layout::carve_leaf::<K, V>(right, &self.leaf_layout);
-        let left_len = (*l.hdr).len as usize;
-        let right_len = (*r.hdr).len as usize;
-        debug_assert!(left_len > 1, "donor would fall below minimum fill");
+        let (key, value) = l.remove(l.len() - 1);
+        r.insert(0, key, value);
 
-        self.shift_right(r.keys_ptr as *mut K, r.vals_ptr as *mut V, 0, right_len);
-        self.move_kv_at(
-            l.keys_ptr as *mut K,
-            l.vals_ptr as *mut V,
-            left_len - 1,
-            r.keys_ptr as *mut K,
-            r.vals_ptr as *mut V,
-            0,
-        );
-        (*l.hdr).len = (left_len - 1) as u16;
-        (*r.hdr).len = (right_len + 1) as u16;
-
-        let new_sep = self.key_clone_at(r.keys_ptr as *const K, 0);
-        let sep_slot = (parts.keys_ptr as *mut K).add(sep_idx);
-        drop(core::ptr::read(sep_slot));
-        core::ptr::write(sep_slot, new_sep);
+        let new_sep = r.key(0).clone();
+        drop(b.replace_key(sep_idx, new_sep));
     }
 
     /// Mirror of `rotate_leaf_right`: the right child's first item becomes
@@ -547,33 +440,16 @@ impl<K: Ord + Clone, V> BPlusTreeMap<K, V> {
             self.delete_profile.leaf_borrows += 1;
         }
 
-        let parts = layout::carve_branch::<K>(branch, &self.branch_layout);
-        let children = parts.children_ptr as *mut *mut u8;
-        let left = NonNull::new_unchecked(*children.add(sep_idx));
-        let right = NonNull::new_unchecked(*children.add(sep_idx + 1));
+        let b = self.branch(branch);
+        let l = self.leaf(b.child(sep_idx));
+        let r = self.leaf(b.child(sep_idx + 1));
+        debug_assert!(r.len() > 1, "donor would fall below minimum fill");
 
-        let l = layout::carve_leaf::<K, V>(left, &self.leaf_layout);
-        let r = layout::carve_leaf::<K, V>(right, &self.leaf_layout);
-        let left_len = (*l.hdr).len as usize;
-        let right_len = (*r.hdr).len as usize;
-        debug_assert!(right_len > 1, "donor would fall below minimum fill");
+        let (key, value) = r.remove(0);
+        l.insert(l.len(), key, value);
 
-        self.move_kv_at(
-            r.keys_ptr as *mut K,
-            r.vals_ptr as *mut V,
-            0,
-            l.keys_ptr as *mut K,
-            l.vals_ptr as *mut V,
-            left_len,
-        );
-        self.shift_left_kv(r.keys_ptr as *mut K, r.vals_ptr as *mut V, 0, right_len - 1);
-        (*l.hdr).len = (left_len + 1) as u16;
-        (*r.hdr).len = (right_len - 1) as u16;
-
-        let new_sep = self.key_clone_at(r.keys_ptr as *const K, 0);
-        let sep_slot = (parts.keys_ptr as *mut K).add(sep_idx);
-        drop(core::ptr::read(sep_slot));
-        core::ptr::write(sep_slot, new_sep);
+        let new_sep = r.key(0).clone();
+        drop(b.replace_key(sep_idx, new_sep));
     }
 
     /// Merge the two children flanking separator `left_idx`:
@@ -582,31 +458,13 @@ impl<K: Ord + Clone, V> BPlusTreeMap<K, V> {
     /// Lean: `mergeLeafPair_window`; `mergeLeafPairH_sim` on the heap (the
     /// right leaf is unlinked and freed, its successor's `prev` moves).
     unsafe fn merge_leaf_pair(&mut self, branch: NonNull<u8>, left_idx: usize) {
-        let parts = layout::carve_branch::<K>(branch, &self.branch_layout);
-        let children = parts.children_ptr as *mut *mut u8;
-        let left = NonNull::new_unchecked(*children.add(left_idx));
-        let right = NonNull::new_unchecked(*children.add(left_idx + 1));
+        let b = self.branch(branch);
+        let left = b.child(left_idx);
+        let right = b.child(left_idx + 1);
 
         self.merge_leaf_into(left, right);
         self.free_emptied_leaf(right);
-        drop(self.remove_branch_entry(branch, left_idx));
-    }
-
-    /// Remove separator `key_idx` and the child slot to its right, returning
-    /// the separator by value: branch merges move it down, leaf merges drop
-    /// it. The caller owns freeing the removed child's node.
-    unsafe fn remove_branch_entry(&mut self, branch: NonNull<u8>, key_idx: usize) -> K {
-        let parts = layout::carve_branch::<K>(branch, &self.branch_layout);
-        let len = (*parts.hdr).len as usize;
-        debug_assert!(key_idx < len, "separator index out of range");
-
-        let keys = parts.keys_ptr as *mut K;
-        let children = parts.children_ptr as *mut *mut u8;
-
-        let separator = core::ptr::read(keys.add(key_idx));
-        self.branch_close_gap(keys, children, key_idx, len);
-        (*parts.hdr).len = (len - 1) as u16;
-        separator
+        drop(b.remove_entry(left_idx));
     }
 
     /// Remove below `node`; on success, also report whether `node` became
@@ -626,11 +484,10 @@ impl<K: Ord + Clone, V> BPlusTreeMap<K, V> {
         K: Borrow<Q>,
         Q: Ord + ?Sized,
     {
-        let hdr = &*(node.as_ptr() as *const NodeHdr);
-        match hdr.tag {
+        match node::tag(node) {
             NodeTag::Leaf => {
                 let entry = self.leaf_remove(node, key)?;
-                *node_underflowed = self.node_len(node) < self.min_leaf_len();
+                *node_underflowed = node::len(node) < self.min_leaf_len();
                 Some(entry)
             }
             NodeTag::Branch => {
@@ -649,27 +506,8 @@ impl<K: Ord + Clone, V> BPlusTreeMap<K, V> {
         K: Borrow<Q>,
         Q: Ord + ?Sized,
     {
-        let parts = layout::carve_leaf::<K, V>(leaf, &self.leaf_layout);
-        let len = (*parts.hdr).len as usize;
-        let keys = core::slice::from_raw_parts(parts.keys_ptr as *const K, len);
-        let idx = self.binary_search_keys(keys, key).ok()?;
-
-        // Read the key and value (transferring ownership)
-        let removed_key = core::ptr::read((parts.keys_ptr as *const K).add(idx));
-        let value = core::ptr::read(parts.vals_ptr.add(idx) as *const V);
-
-        // Shift remaining elements using batched operation
-        if idx < len - 1 {
-            self.shift_left_kv(
-                parts.keys_ptr as *mut K,
-                parts.vals_ptr as *mut V,
-                idx,
-                len - idx - 1,
-            );
-        }
-
-        (*parts.hdr).len = (len - 1) as u16;
-
-        Some((removed_key, value))
+        let l = self.leaf(leaf);
+        let idx = self.binary_search_keys(l.keys(), key).ok()?;
+        Some(l.remove(idx))
     }
 }

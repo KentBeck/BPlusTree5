@@ -225,8 +225,9 @@ def insertH (lc bc fuel : Nat) (m : HeapMap K V) (k : K) (v : V) :
 
 /-! ## Remove -/
 
-/-- `child_len`: reads `children[idx]` unchecked, so a missing slot or an
-unallocated child is a fault. -/
+/-- `plan_rebalance`'s child lengths (`node::len (b.child idx)`): read
+`children[idx]` unchecked, so a missing slot or an unallocated child is a
+fault. -/
 def childLenH (h : Heap K V) (children : List NodeId) (idx : Nat) : Option Nat := do
   let id ← children[idx]?
   h.nodeLen id
@@ -281,7 +282,7 @@ def rotateLeafLeftH (h : Heap K V) (branch : NodeId) (sepIdx : Nat) : Option (He
   | _ => none
 
 /-- `merge_leaf_pair`: `merge_leaf_into`, `free_emptied_leaf`, then
-`remove_branch_entry`. -/
+`BranchRef::remove_entry`. -/
 def mergeLeafPairH (h : Heap K V) (branch : NodeId) (leftIdx : Nat) : Option (Heap K V) := do
   let (c0, es) ← h.getBranch branch
   let left ← childAt c0 es leftIdx
@@ -321,7 +322,7 @@ def rotateBranchLeftH (h : Heap K V) (branch : NodeId) (sepIdx : Nat) : Option (
     h.setBranch branch c0 (setSep es sepIdx promoted)
   | [] => none
 
-/-- `merge_branch_pair`: `remove_branch_entry`, `merge_branch_into` (which
+/-- `merge_branch_pair`: `BranchRef::remove_entry`, `merge_branch_into` (which
 empties the source), then `free_emptied_branch`. -/
 def mergeBranchPairH (h : Heap K V) (branch : NodeId) (leftIdx : Nat) : Option (Heap K V) := do
   let (c0, es) ← h.getBranch branch

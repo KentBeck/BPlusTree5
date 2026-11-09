@@ -1,8 +1,9 @@
 use core::ptr::NonNull;
 
-use crate::layout;
+use crate::layout::NodeTag;
+use crate::node;
 use crate::node_alloc::{alloc_branch_block, alloc_leaf_block};
-use crate::{BPlusTreeMap, NodeHdr, NodeTag};
+use crate::BPlusTreeMap;
 
 pub(crate) enum InsertResult<K, V> {
     NoSplit(Option<V>),
@@ -80,8 +81,7 @@ impl<K: Ord + Clone, V> BPlusTreeMap<K, V> {
         value: V,
         slot: &mut *mut V,
     ) -> InsertResult<K, V> {
-        let hdr = &*(node.as_ptr() as *const NodeHdr);
-        match hdr.tag {
+        match node::tag(node) {
             NodeTag::Leaf => self.leaf_insert_or_split(node, key, value, slot),
             NodeTag::Branch => {
                 let (child, child_idx) = self.child_for_key(node, &key);
@@ -103,12 +103,9 @@ impl<K: Ord + Clone, V> BPlusTreeMap<K, V> {
     /// result well-formed one level higher.
     unsafe fn grow_root(&mut self, old_root: NonNull<u8>, sep_key: K, right: NonNull<u8>) {
         let branch = alloc_branch_block(&self.branch_layout).expect("alloc new root branch");
-        let b = layout::carve_branch::<K>(branch, &self.branch_layout);
-        (*b.hdr).len = 1;
-        self.write_key_at(b.keys_ptr as *mut K, 0, sep_key);
-        let children = b.children_ptr as *mut *mut u8;
-        *children = old_root.as_ptr();
-        *children.add(1) = right.as_ptr();
+        let b = self.branch(branch);
+        b.set_child(0, old_root);
+        b.push_entry(sep_key, right);
         self.root = Some(branch);
     }
 
@@ -125,16 +122,9 @@ impl<K: Ord + Clone, V> BPlusTreeMap<K, V> {
         right: NonNull<u8>,
         old_value: Option<V>,
     ) -> InsertResult<K, V> {
-        let b = layout::carve_branch::<K>(node, &self.branch_layout);
-        let cur_len = (*b.hdr).len as usize;
-        let cap = self.branch_layout.cap as usize;
-        if cur_len < cap {
-            let keys = b.keys_ptr as *mut K;
-            let children = b.children_ptr as *mut *mut u8;
-            self.branch_open_gap(keys, children, child_idx, cur_len);
-            self.write_key_at(keys, child_idx, sep_key);
-            *children.add(child_idx + 1) = right.as_ptr();
-            (*b.hdr).len = (cur_len + 1) as u16;
+        let b = self.branch(node);
+        if !b.is_full() {
+            b.insert_entry(child_idx, sep_key, right);
             InsertResult::NoSplit(old_value)
         } else {
             self.branch_insert_and_split(node, child_idx, sep_key, right, old_value)
@@ -153,15 +143,11 @@ impl<K: Ord + Clone, V> BPlusTreeMap<K, V> {
         ins_right: NonNull<u8>,
         old_value: Option<V>,
     ) -> InsertResult<K, V> {
-        let b = layout::carve_branch::<K>(node, &self.branch_layout);
-        let len = (*b.hdr).len as usize;
-        let keys = b.keys_ptr as *mut K;
-        let children = b.children_ptr as *mut *mut u8;
+        let b = self.branch(node);
+        let len = b.len();
 
         let right_node = alloc_branch_block(&self.branch_layout).expect("alloc right branch");
-        let rb = layout::carve_branch::<K>(right_node, &self.branch_layout);
-        let r_keys = rb.keys_ptr as *mut K;
-        let r_children = rb.children_ptr as *mut *mut u8;
+        let rb = self.branch(right_node);
 
         // View the branch as child_0 plus (key, child-after) entries; the
         // entry view makes this one case, shaped like leaf_insert_or_split:
@@ -177,34 +163,19 @@ impl<K: Ord + Clone, V> BPlusTreeMap<K, V> {
 
         // Move entries [left_keep..len) to the right node: keys to [0..),
         // each entry's child to [1..) (slot 0 is filled by the promotion).
-        let move_count = len - left_keep;
-        core::ptr::copy_nonoverlapping(keys.add(left_keep), r_keys, move_count);
-        core::ptr::copy_nonoverlapping(children.add(left_keep + 1), r_children.add(1), move_count);
-        (*b.hdr).len = left_keep as u16;
-        (*rb.hdr).len = move_count as u16;
+        b.split_tail_to(left_keep, rb);
 
         // Insert the new entry into whichever side it sorts into.
         if insert_idx < left_count {
-            self.branch_open_gap(keys, children, insert_idx, left_keep);
-            self.write_key_at(keys, insert_idx, ins_key);
-            *children.add(insert_idx + 1) = ins_right.as_ptr();
-            (*b.hdr).len = (left_keep + 1) as u16;
+            b.insert_entry(insert_idx, ins_key, ins_right);
         } else {
-            let r_idx = insert_idx - left_keep;
-            self.branch_open_gap(r_keys, r_children, r_idx, move_count);
-            self.write_key_at(r_keys, r_idx, ins_key);
-            *r_children.add(r_idx + 1) = ins_right.as_ptr();
-            (*rb.hdr).len = (move_count + 1) as u16;
+            rb.insert_entry(insert_idx - left_keep, ins_key, ins_right);
         }
 
         // Promote the boundary: the right node's first entry's key goes up,
         // and its child becomes the right node's leftmost child (the same
         // close-slot-0 move as rotate_branch_left's pop).
-        let r_len = (*rb.hdr).len as usize;
-        let sep_key = core::ptr::read(r_keys);
-        core::ptr::copy(r_keys.add(1), r_keys, r_len - 1);
-        core::ptr::copy(r_children.add(1), r_children, r_len);
-        (*rb.hdr).len = (r_len - 1) as u16;
+        let sep_key = rb.pop_front_key();
 
         InsertResult::Split {
             sep_key,
@@ -213,31 +184,6 @@ impl<K: Ord + Clone, V> BPlusTreeMap<K, V> {
         }
     }
 
-    #[inline(always)]
-    unsafe fn insert_into_leaf_slot(
-        &mut self,
-        parts: layout::LeafParts<K, V>,
-        idx: usize,
-        cur_len: usize,
-        key: K,
-        value: V,
-    ) -> *mut V {
-        self.shift_right(
-            parts.keys_ptr as *mut K,
-            parts.vals_ptr as *mut V,
-            idx,
-            cur_len,
-        );
-        self.write_kv_at(
-            parts.keys_ptr as *mut K,
-            parts.vals_ptr as *mut V,
-            idx,
-            key,
-            value,
-        );
-        (*parts.hdr).len = (cur_len + 1) as u16;
-        parts.vals_ptr.add(idx) as *mut V
-    }
     /// Lean: `leafInsertOrSplit_noSplit` and `leafInsertOrSplit_split`
     /// (`Proofs/Leaf.lean`) for the shapes; `leafInsertOrSplit_noSplit_eq` and
     /// `leafInsertOrSplit_split_eq` (`Proofs/Spec.lean`) for the entries.
@@ -248,20 +194,16 @@ impl<K: Ord + Clone, V> BPlusTreeMap<K, V> {
         value: V,
         slot: &mut *mut V,
     ) -> InsertResult<K, V> {
-        let parts = layout::carve_leaf::<K, V>(leaf, &self.leaf_layout);
-        let len = (*parts.hdr).len as usize;
-        let keys = core::slice::from_raw_parts(parts.keys_ptr as *const K, len);
-        match self.binary_search_keys(keys, &key) {
+        let l = self.leaf(leaf);
+        match self.binary_search_keys(l.keys(), &key) {
             Ok(idx) => {
-                let vptr = parts.vals_ptr.add(idx) as *mut V;
-                let old = core::ptr::read(vptr);
-                core::ptr::write(vptr, value);
-                *slot = vptr;
+                let old = l.replace_val(idx, value);
+                *slot = l.val_ptr(idx);
                 InsertResult::NoSplit(Some(old))
             }
             Err(idx) => {
-                if len < self.leaf_layout.cap as usize {
-                    *slot = self.insert_into_leaf_slot(parts, idx, len, key, value);
+                if !l.is_full() {
+                    *slot = l.insert(idx, key, value);
                     return InsertResult::NoSplit(None);
                 }
 
@@ -272,12 +214,11 @@ impl<K: Ord + Clone, V> BPlusTreeMap<K, V> {
                 // separator read at the split stays the right half's first
                 // key.
                 let (right, sep) = self.split_leaf(leaf);
-                let left_len = self.node_len(leaf);
+                let left_len = l.len();
                 *slot = if key < sep {
-                    self.insert_into_leaf_slot(parts, idx, left_len, key, value)
+                    l.insert(idx, key, value)
                 } else {
-                    let r = layout::carve_leaf::<K, V>(right, &self.leaf_layout);
-                    self.insert_into_leaf_slot(r, idx - left_len, len - left_len, key, value)
+                    self.leaf(right).insert(idx - left_len, key, value)
                 };
                 InsertResult::Split {
                     sep_key: sep,
@@ -296,28 +237,17 @@ impl<K: Ord + Clone, V> BPlusTreeMap<K, V> {
     /// Lean: `leafSplit_*` and `leafInsertOrSplit_split` (`Proofs/Leaf.lean`):
     /// both halves hold between `cap / 2` and `cap` items for every `cap >= 2`.
     unsafe fn split_leaf(&mut self, leaf: NonNull<u8>) -> (NonNull<u8>, K) {
-        let l = layout::carve_leaf::<K, V>(leaf, &self.leaf_layout);
-        let len = (*l.hdr).len as usize;
+        let l = self.leaf(leaf);
+        let len = l.len();
         let left_len = (len + 1) / 2;
-        let move_count = len - left_len;
 
         let right = alloc_leaf_block(&self.leaf_layout).expect("alloc right leaf");
-        let r = layout::carve_leaf::<K, V>(right, &self.leaf_layout);
+        let r = self.leaf(right);
         // Moved-from slots stay physically populated; hdr.len excludes them.
-        self.move_kv_range(
-            l.keys_ptr as *const K,
-            l.vals_ptr as *const V,
-            left_len,
-            r.keys_ptr as *mut K,
-            r.vals_ptr as *mut V,
-            0,
-            move_count,
-        );
-        (*l.hdr).len = left_len as u16;
-        (*r.hdr).len = move_count as u16;
+        l.move_tail_to(left_len, r, 0, len - left_len);
         self.link_leaf_after(leaf, right);
 
-        let sep = self.key_clone_at(r.keys_ptr as *const K, 0);
+        let sep = r.key(0).clone();
         (right, sep)
     }
 }

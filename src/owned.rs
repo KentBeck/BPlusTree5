@@ -9,9 +9,10 @@ use core::iter::FusedIterator;
 use core::marker::PhantomData;
 use core::ptr::{self, NonNull};
 
-use crate::layout;
+use crate::layout::{self, NodeTag};
+use crate::node::{self, LeafRef};
 use crate::node_alloc::{free_branch_block, free_leaf_block};
-use crate::{BPlusTreeMap, NodeHdr, NodeTag};
+use crate::BPlusTreeMap;
 
 /// Owning iterator over a map's entries, in key order.
 pub struct IntoIter<K, V> {
@@ -52,10 +53,8 @@ impl<K, V> IntoIter<K, V> {
         let root = map.root.take().expect("a leaf chain implies a root");
         unsafe { map.free_branch_spine(root) };
         unsafe {
-            let fp = layout::carve_leaf::<K, V>(first, &leaf_layout);
-            let lp = layout::carve_leaf::<K, V>(last, &leaf_layout);
-            let front_len = (*fp.hdr).len as usize;
-            let back_idx = (*lp.hdr).len as usize;
+            let front_len = LeafRef::<K, V>::new(first, &leaf_layout).len();
+            let back_idx = LeafRef::<K, V>::new(last, &leaf_layout).len();
             // Only a root leaf can be empty; an empty one still has to be
             // freed, and no entry is ever yielded from it.
             if front_len == 0 {
@@ -87,6 +86,19 @@ impl<K, V> IntoIter<K, V> {
             _marker: PhantomData,
         }
     }
+
+    /// View `leaf` with the iterator's layout.
+    #[inline(always)]
+    unsafe fn leaf(&self, leaf: NonNull<u8>) -> LeafRef<K, V> {
+        LeafRef::new(leaf, &self.leaf_layout)
+    }
+
+    /// Read entry `idx` of `leaf` out, transferring ownership. The slot
+    /// stays physically populated; the cursors never revisit it.
+    #[inline(always)]
+    unsafe fn take_entry(&self, leaf: LeafRef<K, V>, idx: usize) -> (K, V) {
+        (ptr::read(leaf.key_ptr(idx)), ptr::read(leaf.val_ptr(idx)))
+    }
 }
 
 impl<K, V> Iterator for IntoIter<K, V> {
@@ -100,20 +112,17 @@ impl<K, V> Iterator for IntoIter<K, V> {
 
             if self.front_idx < limit {
                 unsafe {
-                    let parts = layout::carve_leaf::<K, V>(leaf, &self.leaf_layout);
-                    let k = ptr::read(parts.keys_ptr.add(self.front_idx) as *const K);
-                    let v = ptr::read(parts.vals_ptr.add(self.front_idx) as *const V);
+                    let entry = self.take_entry(self.leaf(leaf), self.front_idx);
                     self.front_idx += 1;
                     self.remaining -= 1;
-                    return Some((k, v));
+                    return Some(entry);
                 }
             }
 
             // Everything this leaf held has been yielded from one end or
             // the other, so its memory goes back now.
             let next = unsafe {
-                let parts = layout::carve_leaf::<K, V>(leaf, &self.leaf_layout);
-                let next = NonNull::new(*parts.next_ptr);
+                let next = self.leaf(leaf).next();
                 free_leaf_block(leaf, &self.leaf_layout);
                 next
             };
@@ -129,10 +138,9 @@ impl<K, V> Iterator for IntoIter<K, V> {
                     return None;
                 }
                 Some(next) => unsafe {
-                    let np = layout::carve_leaf::<K, V>(next, &self.leaf_layout);
                     self.front = Some(next);
                     self.front_idx = 0;
-                    self.front_len = (*np.hdr).len as usize;
+                    self.front_len = self.leaf(next).len();
                 },
             }
         }
@@ -152,18 +160,15 @@ impl<K, V> DoubleEndedIterator for IntoIter<K, V> {
 
             if self.back_idx > lower {
                 unsafe {
-                    let parts = layout::carve_leaf::<K, V>(self.back, &self.leaf_layout);
                     self.back_idx -= 1;
-                    let k = ptr::read(parts.keys_ptr.add(self.back_idx) as *const K);
-                    let v = ptr::read(parts.vals_ptr.add(self.back_idx) as *const V);
+                    let entry = self.take_entry(self.leaf(self.back), self.back_idx);
                     self.remaining -= 1;
-                    return Some((k, v));
+                    return Some(entry);
                 }
             }
 
             let prev = unsafe {
-                let parts = layout::carve_leaf::<K, V>(self.back, &self.leaf_layout);
-                let prev = parts.prev_ptr.and_then(|p| NonNull::new(*p));
+                let prev = self.leaf(self.back).prev();
                 free_leaf_block(self.back, &self.leaf_layout);
                 prev
             };
@@ -179,9 +184,8 @@ impl<K, V> DoubleEndedIterator for IntoIter<K, V> {
                     return None;
                 }
                 Some(prev) => unsafe {
-                    let pp = layout::carve_leaf::<K, V>(prev, &self.leaf_layout);
                     self.back = prev;
-                    self.back_idx = (*pp.hdr).len as usize;
+                    self.back_idx = self.leaf(prev).len();
                 },
             }
         }
@@ -211,17 +215,16 @@ impl<K, V> BPlusTreeMap<K, V> {
     /// The inverse of the branch half of `drop_subtree`: used when the
     /// leaves are about to be drained by an owning iterator.
     unsafe fn free_branch_spine(&mut self, node: NonNull<u8>) {
-        let hdr = &*(node.as_ptr() as *const NodeHdr);
-        if hdr.tag == NodeTag::Leaf {
+        if node::tag(node) == NodeTag::Leaf {
             return;
         }
-        let parts = layout::carve_branch::<K>(node, &self.branch_layout);
-        let len = (*parts.hdr).len as usize;
-        let children = core::slice::from_raw_parts(parts.children_ptr as *const *mut u8, len + 1);
-        for child in children.iter().filter_map(|&p| NonNull::new(p)) {
-            self.free_branch_spine(child);
+        let branch = self.branch(node);
+        for i in 0..=branch.len() {
+            if let Some(child) = branch.child_or_null(i) {
+                self.free_branch_spine(child);
+            }
         }
-        ptr::drop_in_place(ptr::slice_from_raw_parts_mut(parts.keys_ptr as *mut K, len));
+        branch.drop_keys();
         free_branch_block(node, &self.branch_layout);
     }
 }

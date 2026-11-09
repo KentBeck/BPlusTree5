@@ -1,6 +1,4 @@
-use core::mem::MaybeUninit;
 use core::mem::{align_of, size_of};
-use core::ptr::NonNull;
 
 #[inline]
 pub const fn align_up(x: usize, a: usize) -> usize {
@@ -141,57 +139,5 @@ impl BranchLayout {
             children_off,
             keys_off,
         }
-    }
-}
-
-// ============================
-// Raw carving helpers
-// ============================
-
-#[derive(Copy, Clone)]
-pub struct LeafParts<K, V> {
-    pub hdr: *mut NodeHdr,
-    pub next_ptr: *mut *mut u8,
-    pub prev_ptr: Option<*mut *mut u8>,
-    pub keys_ptr: *mut MaybeUninit<K>,
-    pub vals_ptr: *mut MaybeUninit<V>,
-}
-
-#[derive(Copy, Clone)]
-pub struct BranchParts<K> {
-    pub hdr: *mut NodeHdr,
-    pub children_ptr: *mut MaybeUninit<*mut u8>,
-    pub keys_ptr: *mut MaybeUninit<K>,
-}
-
-/// Carve a leaf node's header, sibling pointers, and arrays from a raw base pointer.
-#[inline(always)]
-pub unsafe fn carve_leaf<K, V>(base: NonNull<u8>, layout: &LeafLayout) -> LeafParts<K, V> {
-    let p = base.as_ptr();
-    let hdr = p as *mut NodeHdr;
-    let next_ptr = p.add(layout.next_off) as *mut *mut u8;
-    let prev_ptr = layout.prev_off.map(|off| p.add(off) as *mut *mut u8);
-    let keys_ptr = p.add(layout.keys_off) as *mut MaybeUninit<K>;
-    let vals_ptr = p.add(layout.vals_off) as *mut MaybeUninit<V>;
-    LeafParts {
-        hdr,
-        next_ptr,
-        prev_ptr,
-        keys_ptr,
-        vals_ptr,
-    }
-}
-
-/// Carve a branch node's header, children pointers, and keys array from a raw base pointer.
-#[inline(always)]
-pub unsafe fn carve_branch<K>(base: NonNull<u8>, layout: &BranchLayout) -> BranchParts<K> {
-    let p = base.as_ptr();
-    let hdr = p as *mut NodeHdr;
-    let children_ptr = p.add(layout.children_off) as *mut MaybeUninit<*mut u8>;
-    let keys_ptr = p.add(layout.keys_off) as *mut MaybeUninit<K>;
-    BranchParts {
-        hdr,
-        children_ptr,
-        keys_ptr,
     }
 }

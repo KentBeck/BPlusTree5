@@ -9,7 +9,6 @@ use core::fmt;
 use core::mem;
 use core::ptr::NonNull;
 
-use crate::layout;
 use crate::BPlusTreeMap;
 
 /// Which end of a leaf [`BPlusTreeMap::edge_slot`] reads.
@@ -161,9 +160,7 @@ impl<'a, K: Ord + Clone, V> OccupiedEntry<'a, K, V> {
 impl<K: Ord + Clone, V> BPlusTreeMap<K, V> {
     /// A view into the entry for `key`, for in-place inspection or insertion.
     pub fn entry(&mut self, key: K) -> Entry<'_, K, V> {
-        let slot = self
-            .leaf_search(&key)
-            .map(|(parts, idx)| unsafe { parts.vals_ptr.add(idx) as *mut V });
+        let slot = self.leaf_search(&key).map(|(leaf, idx)| leaf.val_ptr(idx));
         match slot {
             Some(slot) => Entry::Occupied(OccupiedEntry {
                 map: self,
@@ -198,12 +195,12 @@ impl<K: Ord + Clone, V> BPlusTreeMap<K, V> {
 
     /// The key and the value's slot at one end of `leaf`.
     ///
-    /// The slot pointer is carved straight out of the node allocation. A
-    /// pointer taken instead from a `&V` would only carry read permission,
-    /// and writing through it would be undefined behaviour.
+    /// The slot pointer comes straight from the node allocation. A pointer
+    /// taken instead from a `&V` would only carry read permission, and
+    /// writing through it would be undefined behaviour.
     unsafe fn edge_slot(&self, leaf: NonNull<u8>, edge: Edge) -> Option<(K, *mut V)> {
-        let parts = layout::carve_leaf::<K, V>(leaf, &self.leaf_layout);
-        let len = (*parts.hdr).len as usize;
+        let l = self.leaf(leaf);
+        let len = l.len();
         // Only a root leaf can be empty.
         if len == 0 {
             return None;
@@ -212,8 +209,7 @@ impl<K: Ord + Clone, V> BPlusTreeMap<K, V> {
             Edge::First => 0,
             Edge::Last => len - 1,
         };
-        let key = (*(parts.keys_ptr.add(idx) as *const K)).clone();
-        Some((key, parts.vals_ptr.add(idx) as *mut V))
+        Some((l.key(idx).clone(), l.val_ptr(idx)))
     }
 }
 

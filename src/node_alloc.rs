@@ -3,7 +3,8 @@ extern crate alloc;
 use alloc::alloc::{alloc, dealloc, Layout};
 use core::ptr::{self, NonNull};
 
-use crate::layout::{carve_leaf, BranchLayout, LeafLayout, NodeHdr, NodeTag};
+use crate::layout::{BranchLayout, LeafLayout, NodeHdr, NodeTag};
+use crate::node::LeafRef;
 
 // Every allocation here is matched by the free directly below it. Node blocks
 // are raw memory: allocating one does not construct keys or values, and
@@ -60,11 +61,9 @@ pub unsafe fn init_leaf_block(base: NonNull<u8>, layout: &LeafLayout) {
     );
 
     // Sibling pointers set to null by default
-    let parts = carve_leaf::<(), ()>(base, layout);
-    ptr::write(parts.next_ptr, core::ptr::null_mut());
-    if let Some(prev) = parts.prev_ptr {
-        ptr::write(prev, core::ptr::null_mut());
-    }
+    let leaf = LeafRef::<(), ()>::new(base, layout);
+    leaf.set_next(None);
+    leaf.set_prev(None);
 }
 
 /// Allocate a branch node block and initialize its header.
