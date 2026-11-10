@@ -64,6 +64,8 @@ impl<K, V> LeafRef<K, V> {
         }
     }
 
+    /// Read only by the inspection tooling in `check.rs`.
+    #[cfg(any(test, feature = "internal"))]
     /// The node this view reads.
     #[inline(always)]
     pub(crate) fn node(self) -> NonNull<u8> {
@@ -238,6 +240,8 @@ impl<K, V> LeafRef<K, V> {
         }
     }
 
+    /// Read only by the inspection tooling in `check.rs`.
+    #[cfg(any(test, feature = "internal"))]
     /// Whether the layout stores a backward link at all.
     #[inline(always)]
     pub(crate) fn has_prev_link(self) -> bool {
@@ -322,6 +326,8 @@ impl<K> BranchRef<K> {
         unsafe { core::slice::from_raw_parts(self.key_ptr(0), self.len()) }
     }
 
+    /// Read only by the inspection tooling in `check.rs`.
+    #[cfg(any(test, feature = "internal"))]
     #[inline(always)]
     pub(crate) fn key<'a>(self, i: usize) -> &'a K {
         debug_assert!(i < self.len(), "key index out of range");

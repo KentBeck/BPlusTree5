@@ -29,6 +29,7 @@ use core::marker::PhantomData;
 use core::ptr::NonNull;
 
 mod bulk;
+mod check;
 mod common;
 mod delete;
 mod entry;
@@ -60,7 +61,7 @@ pub use set::BPlusTreeSet;
 /// public API; see [`internal`](crate::internal).
 #[cfg(any(test, feature = "internal"))]
 #[doc(hidden)]
-pub use common::ShapeHasher;
+pub use check::ShapeHasher;
 #[cfg(any(test, feature = "internal"))]
 #[doc(hidden)]
 pub use layout::{align_up, BranchLayout, LeafLayout, NodeHdr, NodeTag};
