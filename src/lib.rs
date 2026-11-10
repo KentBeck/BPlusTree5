@@ -161,6 +161,23 @@ impl<K, V> BPlusTreeMap<K, V> {
     }
 }
 
+/// Define a constructor that is `pub(crate)` in a normal build and a
+/// hidden `pub` knob when the crate is built for its own tests or with
+/// the `internal` feature. One body, two visibilities: the language has
+/// no way to say this on a single `fn`.
+macro_rules! internal_constructor {
+    ($(#[$meta:meta])* fn $name:ident($($arg:ident: $ty:ty),* $(,)?) -> Self $body:block) => {
+        $(#[$meta])*
+        #[cfg(any(test, feature = "internal"))]
+        #[doc(hidden)]
+        pub fn $name($($arg: $ty),*) -> Self $body
+
+        $(#[$meta])*
+        #[cfg(not(any(test, feature = "internal")))]
+        pub(crate) fn $name($($arg: $ty),*) -> Self $body
+    };
+}
+
 impl<K: Ord + Clone, V> BPlusTreeMap<K, V> {
     /// An empty map.
     ///
@@ -168,55 +185,58 @@ impl<K: Ord + Clone, V> BPlusTreeMap<K, V> {
     /// targets 512 bytes of keys and values, a branch 4 KiB of keys and
     /// child pointers. Nothing is allocated until the first insert.
     pub fn new() -> Self {
-        Self::with_payload_targets_impl(
+        Self::with_payload_targets(
             RECOMMENDED_LEAF_PAYLOAD_BYTES,
             RECOMMENDED_BRANCH_PAYLOAD_BYTES,
         )
     }
 
-    /// Construct from desired payload bytes rather than entry counts.
-    ///
-    /// A leaf slot is one `K` plus one `V`; a branch slot is one `K` plus one
-    /// child pointer. Node headers, sibling links, one extra branch child
-    /// pointer, and alignment padding sit outside these targets. Capacities
-    /// are clamped to the supported range of 4 through [`u16::MAX`], so a
-    /// target can be exceeded when four entries of a large type do not fit.
-    pub(crate) fn with_payload_targets_impl(
-        leaf_payload_bytes: usize,
-        branch_payload_bytes: usize,
-    ) -> Self {
-        let leaf_slot_bytes = core::mem::size_of::<K>().saturating_add(core::mem::size_of::<V>());
-        let branch_slot_bytes =
-            core::mem::size_of::<K>().saturating_add(core::mem::size_of::<*mut u8>());
-        let leaf_cap = capacity_for_payload(leaf_payload_bytes, leaf_slot_bytes);
-        let branch_cap = capacity_for_payload(branch_payload_bytes, branch_slot_bytes);
-        Self::with_capacities_impl(leaf_cap, branch_cap)
+    internal_constructor! {
+        /// An empty map whose capacities come from per-node byte budgets.
+        ///
+        /// A leaf slot is one `K` plus one `V`; a branch slot is one `K` plus
+        /// one child pointer. Node headers, sibling links, one extra branch
+        /// child pointer, and alignment padding sit outside these targets.
+        /// Capacities are clamped to the supported range of 4 through
+        /// [`u16::MAX`], so a target can be exceeded when four entries of a
+        /// large type do not fit.
+        fn with_payload_targets(leaf_payload_bytes: usize, branch_payload_bytes: usize) -> Self {
+            let leaf_slot_bytes =
+                core::mem::size_of::<K>().saturating_add(core::mem::size_of::<V>());
+            let branch_slot_bytes =
+                core::mem::size_of::<K>().saturating_add(core::mem::size_of::<*mut u8>());
+            let leaf_cap = capacity_for_payload(leaf_payload_bytes, leaf_slot_bytes);
+            let branch_cap = capacity_for_payload(branch_payload_bytes, branch_slot_bytes);
+            Self::with_capacities(leaf_cap, branch_cap)
+        }
     }
 
-    /// Construct with independent leaf and branch capacities (entries per
-    /// node). Inserts shift half a leaf on average, so smaller leaves make
-    /// inserts cheaper, while larger branches keep the tree shallow for
-    /// lookups; decoupling the two lets a workload pick both.
-    ///
-    /// Panics if either capacity is below four, the smallest a node can
-    /// hold and still split and merge.
-    pub(crate) fn with_capacities_impl(leaf_cap: usize, branch_cap: usize) -> Self {
-        assert!(
-            leaf_cap >= MIN_NODE_CAPACITY && branch_cap >= MIN_NODE_CAPACITY,
-            "node capacity must be at least {MIN_NODE_CAPACITY}"
-        );
-        let leaf_u16 = core::cmp::min(leaf_cap, u16::MAX as usize) as u16;
-        let branch_u16 = core::cmp::min(branch_cap, u16::MAX as usize) as u16;
-        // The root leaf is allocated by the first insert, so an empty map
-        // costs nothing beyond its layouts.
-        Self {
-            root: None,
-            entry_count: 0,
-            #[cfg(feature = "delete_profile")]
-            delete_profile: DeleteProfile::default(),
-            leaf_layout: LeafLayout::compute_for_cap::<K, V>(leaf_u16, true),
-            branch_layout: BranchLayout::compute_for_cap::<K>(branch_u16),
-            _marker: PhantomData,
+    internal_constructor! {
+        /// An empty map with independent leaf and branch capacities (entries
+        /// per node). Inserts shift half a leaf on average, so smaller leaves
+        /// make inserts cheaper, while larger branches keep the tree shallow
+        /// for lookups; decoupling the two lets a workload pick both.
+        ///
+        /// Panics if either capacity is below four, the smallest a node can
+        /// hold and still split and merge.
+        fn with_capacities(leaf_cap: usize, branch_cap: usize) -> Self {
+            assert!(
+                leaf_cap >= MIN_NODE_CAPACITY && branch_cap >= MIN_NODE_CAPACITY,
+                "node capacity must be at least {MIN_NODE_CAPACITY}"
+            );
+            let leaf_u16 = core::cmp::min(leaf_cap, u16::MAX as usize) as u16;
+            let branch_u16 = core::cmp::min(branch_cap, u16::MAX as usize) as u16;
+            // The root leaf is allocated by the first insert, so an empty map
+            // costs nothing beyond its layouts.
+            Self {
+                root: None,
+                entry_count: 0,
+                #[cfg(feature = "delete_profile")]
+                delete_profile: DeleteProfile::default(),
+                leaf_layout: LeafLayout::compute_for_cap::<K, V>(leaf_u16, true),
+                branch_layout: BranchLayout::compute_for_cap::<K>(branch_u16),
+                _marker: PhantomData,
+            }
         }
     }
 

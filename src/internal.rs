@@ -13,21 +13,11 @@ impl<K: Ord + Clone, V> BPlusTreeMap<K, V> {
     ///
     /// Small capacities make splits, merges and borrows happen after a
     /// handful of operations, which is how the tests reach those paths.
+    /// `with_capacities` and `with_payload_targets`, the other two knobs,
+    /// are defined beside `new` in `lib.rs`.
     #[doc(hidden)]
     pub fn with_capacity(capacity: usize) -> Self {
-        Self::with_capacities_impl(capacity, capacity)
-    }
-
-    /// An empty map with independent leaf and branch capacities.
-    #[doc(hidden)]
-    pub fn with_capacities(leaf_cap: usize, branch_cap: usize) -> Self {
-        Self::with_capacities_impl(leaf_cap, branch_cap)
-    }
-
-    /// An empty map whose capacities come from per-node byte budgets.
-    #[doc(hidden)]
-    pub fn with_payload_targets(leaf_payload_bytes: usize, branch_payload_bytes: usize) -> Self {
-        Self::with_payload_targets_impl(leaf_payload_bytes, branch_payload_bytes)
+        Self::with_capacities(capacity, capacity)
     }
 
     /// The computed layout of this map's leaf nodes.
